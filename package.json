@@ -8,6 +8,11 @@
   "build": {
     "appId": "com.abbaaminu.pdfeditor",
     "productName": "PdfEditor",
+    "publish": {
+      "provider": "github",
+      "owner": "abbaaminu",
+      "repo": "PdfEditor"
+    },
     "directories": {
       "buildResources": "assets",
       "output": "release"
