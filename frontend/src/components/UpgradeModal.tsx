@@ -71,8 +71,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
   const demoTimerRef = useRef<number | null>(null);
 
   // Invalidate any in-flight checkout/demo session whenever the modal closes.
-  // State is reset through handleClose(); this effect only flips refs so no
-  // late callback can fire after the modal has been closed by the parent.
   useEffect(() => {
     if (isOpen) return;
     sessionActiveRef.current = false;
@@ -171,8 +169,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     try {
       const items = [{ priceId: getPriceId(billingCycle), quantity: 1 }];
 
-      // Build the shared checkout config. Paddle collects the billing email
-      // for guests; signed-in users also carry their id for webhook mapping.
       const openCheckout = (): PaddleCheckoutOpenOptions => {
         const options: PaddleCheckoutOpenOptions = {
           items,
@@ -194,9 +190,14 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return;
       }
 
-      // 2. Otherwise initialize the Paddle SDK (deduped) when a seller is set.
-      const sellerId = Number(import.meta.env.VITE_PADDLE_SELLER_ID ?? '') || 0;
-      if (sellerId > 0) {
+      // 2. Otherwise initialize the Paddle SDK (deduped) when a client token is set.
+      const token = (
+        import.meta.env.VITE_PADDLE_CLIENT_TOKEN ||
+        import.meta.env.VITE_PADDLE_SELLER_ID ||
+        ''
+      ).trim();
+
+      if (token) {
         if (!paddleInitialization) {
           paddleInitialization = import('@paddle/paddle-js')
             .then(({ initializePaddle }) => {
@@ -204,7 +205,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
                 import.meta.env.VITE_PADDLE_ENV === 'production' ? 'production' : 'sandbox';
               return initializePaddle({
                 environment,
-                seller: sellerId,
+                token,
                 eventCallback: handleCheckoutEvent,
               }) as unknown as PaddleInstance | null;
             })
@@ -219,8 +220,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return;
       }
 
-      // 3. Development fallback so the upgrade flow can be tested end-to-end
-      // before real Paddle credentials are wired up.
+      // 3. Development fallback so the upgrade flow can be tested end-to-end.
       if (import.meta.env.DEV) {
         if (!sessionActiveRef.current) return;
         setIsDemoCheckout(true);
@@ -446,4 +446,3 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     </div>
   );
 };
-
