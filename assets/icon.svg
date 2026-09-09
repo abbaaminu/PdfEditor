@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+
+    <!-- Document Card Gradient -->
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+
+    <!-- Fold Corner Gradient -->
+    <linearGradient id="foldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+
+    <!-- Drop Shadow -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- PDF Document Base with Shadow -->
+  <g filter="url(#shadow)">
+    <!-- Document Main Body -->
+    <path d="M 140 100 L 300 100 L 372 172 L 372 410 A 16 16 0 0 1 356 426 L 156 426 A 16 16 0 0 1 140 410 Z" fill="url(#docGrad)" />
+
+    <!-- Page Fold -->
+    <path d="M 300 100 L 300 156 A 16 16 0 0 0 316 172 L 372 172 Z" fill="url(#foldGrad)" />
+  </g>
+
+  <!-- PDF Text / Badge -->
+  <rect x="176" y="220" width="160" height="40" rx="8" fill="#ffffff" fill-opacity="0.15" />
+  <text x="256" y="248" font-family="Segoe UI, Arial, sans-serif" font-weight="900" font-size="24" fill="#ffffff" text-anchor="middle" letter-spacing="2">PDF</text>
+
+  <!-- Edit Pen Icon Overlay -->
+  <g transform="translate(290, 290) scale(1.5)" filter="url(#shadow)">
+    <circle cx="28" cy="28" r="32" fill="#10b981" />
+    <!-- Pen Symbol -->
+    <path d="M 18 38 L 18 42 L 22 42 L 36 28 L 32 24 Z M 38 26 L 40 24 A 2 2 0 0 0 40 21 L 39 20 A 2 2 0 0 0 36 20 L 34 22 Z" fill="#ffffff" />
+  </g>
+</svg>

@@ -1,0 +1,112 @@
+{
+  "name": "pdfeditor",
+  "version": "1.0.0",
+  "main": "main.js",
+  "description": "A desktop PDF editing and management tool built with React and Electron.",
+  "author": "Abba Aminu",
+  "homepage": "./",
+  "build": {
+    "appId": "com.abbaaminu.pdfeditor",
+    "productName": "PdfEditor",
+    "directories": {
+      "buildResources": "assets",
+      "output": "release"
+    },
+    "files": [
+      "!.env*",
+      "!**/.env*",
+      "!backend/.env*",
+      "frontend/dist/**/*",
+      "backend/**/*.js",
+      "backend/package.json",
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/pdf-poppler/lib/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/sharp/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "linux": {
+      "category": "Office",
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "generate-icon": "node scripts/generate-icon.js",
+    "postinstall": "electron-builder install-app-deps",
+    "start:backend": "node backend/index.js",
+    "start:frontend": "npm run dev --prefix frontend",
+    "start:electron": "wait-on http://localhost:5173 && electron .",
+    "dev": "concurrently -k -p \"[{name}]\" -c \"blue.bold,cyan.bold,magenta.bold\" -n \"BACKEND,FRONTEND,ELECTRON\" \"npm run start:backend\" \"npm run start:frontend\" \"npm run start:electron\"",
+    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build:frontend",
+    "electron": "electron .",
+    "package": "npm run generate-icon && npm run build:frontend && electron-builder",
+    "dist": "npm run package",
+    "dist:win": "npm run generate-icon && npm run build:frontend && electron-builder --win",
+    "dist:mac": "npm run generate-icon && npm run build:frontend && electron-builder --mac",
+    "dist:linux": "npm run generate-icon && npm run build:frontend && electron-builder --linux",
+    "dist:all": "npm run generate-icon && npm run build:frontend && electron-builder -wml"
+  },
+  "dependencies": {
+    "@paddle/paddle-js": "^1.6.5",
+    "cors": "^2.8.6",
+    "docx": "^9.7.1",
+    "dotenv": "^17.4.2",
+    "electron-prompt": "^1.7.0",
+    "express": "^5.2.1",
+    "fs-extra": "^11.3.6",
+    "lucide-react": "^1.41.0",
+    "mammoth": "^1.12.2",
+    "pdf-lib": "^1.17.1",
+    "pdf-poppler": "^0.2.3",
+    "pdf2pic": "^3.2.0",
+    "pdfjs-dist": "^6.3.289",
+    "sharp": "^0.35.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "concurrently": "^10.0.5",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "png-to-ico": "^3.0.2",
+    "wait-on": "^9.1.0"
+  }
+}

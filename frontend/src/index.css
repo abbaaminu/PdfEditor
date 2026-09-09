@@ -1,0 +1,276 @@
+@import "tailwindcss";
+
+body {
+  background-color: #020617;
+  color: #f8fafc;
+  min-height: 100vh;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: #6366f1;
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   Word Viewer – styled rendering of the HTML produced by mammoth
+   ========================================================================== */
+.wv-content {
+  color: #e2e8f0;
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+
+.wv-content > :first-child {
+  margin-top: 0;
+}
+
+.wv-content h1,
+.wv-content h2,
+.wv-content h3,
+.wv-content h4,
+.wv-content h5,
+.wv-content h6 {
+  color: #f8fafc;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.4em 0 0.55em;
+}
+
+.wv-content h1 {
+  font-size: 1.75rem;
+}
+
+.wv-content h2 {
+  font-size: 1.45rem;
+}
+
+.wv-content h3 {
+  font-size: 1.2rem;
+}
+
+.wv-content h4,
+.wv-content h5,
+.wv-content h6 {
+  font-size: 1.05rem;
+}
+
+.wv-content p {
+  margin: 0 0 1em;
+}
+
+.wv-content a {
+  color: #818cf8;
+  text-decoration: underline;
+}
+
+.wv-content ul,
+.wv-content ol {
+  margin: 0 0 1em;
+  padding-left: 1.6em;
+}
+
+.wv-content ul {
+  list-style: disc;
+}
+
+.wv-content ol {
+  list-style: decimal;
+}
+
+.wv-content li {
+  margin: 0.25em 0;
+}
+
+.wv-content li > ul,
+.wv-content li > ol {
+  margin-top: 0.25em;
+}
+
+.wv-content strong,
+.wv-content b {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.wv-content blockquote {
+  border-left: 3px solid #6366f1;
+  margin: 0 0 1em;
+  padding: 0.15em 0 0.15em 1em;
+  color: #cbd5e1;
+}
+
+.wv-content img {
+  height: auto;
+  margin: 0.5em 0;
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+
+.wv-content table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+  margin: 0 0 1em;
+  width: 100%;
+}
+
+.wv-content th,
+.wv-content td {
+  border: 1px solid #334155;
+  padding: 0.5em 0.75em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wv-content th {
+  background: #1e293b;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.wv-content tr:nth-child(even) td {
+  background: rgba(30, 41, 59, 0.45);
+}
+
+.wv-content pre {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin: 0 0 1em;
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+}
+
+.wv-content code {
+  color: #a5b4fc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.wv-content hr {
+  border: 0;
+  border-top: 1px solid #334155;
+  margin: 1.5em 0;
+}
+
+/* ==========================================================================
+   Document Creator – rich text editor
+   ========================================================================== */
+.doc-editor:focus {
+  outline: none;
+}
+
+.doc-editor[data-placeholder]:empty::before {
+  color: #64748b;
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.doc-editor p {
+  margin: 0 0 0.5em;
+}
+
+.doc-editor ul {
+  list-style: disc;
+  padding-left: 1.5em;
+  margin: 0 0 0.5em;
+}
+
+.doc-editor ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+  margin: 0 0 0.5em;
+}
+
+.doc-editor h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+}
+
+.doc-editor h2 {
+  font-size: 1.4em;
+  font-weight: 700;
+}
+
+.doc-editor h3 {
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   Toast notifications
+   ========================================================================== */
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-pop {
+  animation: toast-pop 0.18s ease-out both;
+}
+
+@keyframes toast-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.toast-progress-bar {
+  animation: toast-progress-slide 1.1s linear infinite;
+}
+
+
+/* ==========================================================================
+   PDF.js text layer (native text selection & highlight support)
+   Adapted from pdfjs-dist/web/pdf_viewer.css for the pinned 3.11.174 build.
+   ========================================================================== */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-align: initial;
+  cursor: text;
+  opacity: 1;
+  transform-origin: 0 0;
+  caret-color: rgb(0 0 0);
+  -webkit-font-smoothing: antialiased;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.textLayer ::selection {
+  background: rgba(0 0 255 / 0.25);
+}
+
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer .endOfContent.active {
+  top: 0;
+}
