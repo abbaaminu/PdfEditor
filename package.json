@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "main.js",
   "description": "A desktop PDF editing and management tool built with React and Electron.",
-  "author": "Abba Aminu",
+  "author": "Abba Aminu <abbaaminu201215@gmail.com>",
   "homepage": "./",
   "build": {
     "appId": "com.abbaaminu.pdfeditor",
