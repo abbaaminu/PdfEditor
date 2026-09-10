@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Check, CircleAlert, Crown, LoaderCircle, Sparkles, X } from 'lucide-react';
+import { grantLocalProAccess, verifyPromoCode } from '../lib/promo';
 import { useAuthStore } from '../store/auth-context';
 import { useToast } from './toast-context';
 
@@ -42,6 +43,23 @@ const COMPLETED_EVENT = 'checkout.completed';
 const CLOSED_EVENT = 'checkout.closed';
 const FAILED_EVENTS = new Set(['checkout.error', 'checkout.failed']);
 
+/**
+ * True inside the Electron desktop shell. The preload bridge always exposes
+ * `window.electron`, so the UA check is only a fallback for edge cases.
+ */
+const isElectron =
+  /electron/i.test(navigator.userAgent) ||
+  Boolean((window as unknown as { electron?: unknown }).electron);
+
+/**
+ * Hosted checkout used by the desktop build. Paddle's JS Checkout is
+ * web-only, so desktop users complete the purchase in their default browser
+ * and the license is applied when they come back to the app.
+ */
+const WEB_UPGRADE_URL =
+  (import.meta.env.VITE_WEB_UPGRADE_URL as string | undefined)?.trim() ||
+  'https://pdf.stackbuildco.com/upgrade';
+
 let paddleInitialization: Promise<PaddleInstance | null> | null = null;
 
 function getPriceId(billingCycle: BillingCycle): string {
@@ -61,6 +79,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
   const [isDemoCheckout, setIsDemoCheckout] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [promoError, setPromoError] = useState('');
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
 
   const sessionActiveRef = useRef(false);
   const demoTimerRef = useRef<number | null>(null);
@@ -146,6 +165,18 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     setIsCheckingOut(true);
     setIsDemoCheckout(false);
 
+    // Desktop (Electron) builds never initialise Paddle locally: send the user
+    // to the hosted web checkout in their default browser instead. The web app
+    // keeps the existing Paddle SDK flow untouched (see below).
+    if (isElectron) {
+      window.open(WEB_UPGRADE_URL, '_blank');
+      toast.success(
+        `Checkout opened in your browser. If it did not appear, visit ${WEB_UPGRADE_URL}.`
+      );
+      handleClose();
+      return;
+    }
+
     const activeDiscount = (overridePromo ?? promoCode).trim() || undefined;
 
     try {
@@ -228,26 +259,33 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     } finally {
       setIsCheckingOut(false);
     }
-  }, [billingCycle, handleCheckoutEvent, handlePurchaseComplete, isCheckingOut, promoCode, toast, user]);
+  }, [billingCycle, handleCheckoutEvent, handleClose, handlePurchaseComplete, isCheckingOut, promoCode, toast, user]);
 
-  const applyPromoCode = useCallback(() => {
+  const applyPromoCode = useCallback(async () => {
     const trimmedCode = promoCode.trim();
-    if (!trimmedCode) return;
+    if (!trimmedCode || isApplyingPromo) return;
 
-    const configuredCode = (
-      import.meta.env.VITE_PRO_PROMO_CODE || import.meta.env.VITE_PADDLE_PROMO_CODE || ''
-    ).trim();
+    setIsApplyingPromo(true);
+    setPromoError('');
 
-    // Direct local bypass if code matches VITE_PRO_PROMO_CODE
-    if (configuredCode && trimmedCode.toLowerCase() === configuredCode.toLowerCase()) {
-      sessionActiveRef.current = true;
-      handlePurchaseComplete();
-      return;
+    try {
+      // Checks the configured promo list first, then the Supabase
+      // `license_keys` table (which may not exist yet — that is not an error).
+      const result = await verifyPromoCode(trimmedCode);
+      if (result === 'accepted') {
+        // Persist the device entitlement, flip the store and dismiss the modal.
+        grantLocalProAccess();
+        sessionActiveRef.current = true;
+        handlePurchaseComplete();
+        return;
+      }
+      setPromoError('Invalid code');
+    } catch (err) {
+      setPromoError(err instanceof Error ? err.message : 'Invalid code');
+    } finally {
+      setIsApplyingPromo(false);
     }
-
-    // Otherwise launch Paddle with the code pre-applied
-    startCheckout(trimmedCode);
-  }, [handlePurchaseComplete, promoCode, startCheckout]);
+  }, [handlePurchaseComplete, isApplyingPromo, promoCode]);
 
   if (!isOpen) return null;
 
@@ -396,7 +434,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
 
         <button
           type="button"
-          onClick={() => startCheckout()}
+          onClick={() => void startCheckout()}
           disabled={isCheckingOut}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-semibold text-white shadow-lg transition hover:bg-indigo-500 active:scale-98 disabled:cursor-not-allowed disabled:opacity-70"
         >
@@ -407,7 +445,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
           )}
           {isCheckingOut
             ? 'Opening checkout…'
-            : `Subscribe for ${billingCycle === 'monthly' ? '$2.00 / month' : '$20.00 / year'}`}
+            : isElectron
+              ? 'Subscribe in browser'
+              : `Subscribe for ${billingCycle === 'monthly' ? '$2.00 / month' : '$20.00 / year'}`}
         </button>
 
         <div className="mt-4 border-t border-slate-800 pt-4">
@@ -422,20 +462,33 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
                 setPromoCode(event.target.value);
                 setPromoError('');
               }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void applyPromoCode();
+                }
+              }}
               placeholder="Enter code"
               autoComplete="off"
+              disabled={isApplyingPromo}
+              aria-invalid={Boolean(promoError)}
               className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               type="button"
-              onClick={applyPromoCode}
-              disabled={!promoCode.trim() || isCheckingOut}
-              className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void applyPromoCode()}
+              disabled={!promoCode.trim() || isCheckingOut || isApplyingPromo}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-500/50 px-3 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
+              {isApplyingPromo && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
               Apply
             </button>
           </div>
-          {promoError && <p className="mt-2 text-xs text-red-300">{promoError}</p>}
+          {promoError && (
+            <p role="alert" className="mt-2 text-xs text-red-300">
+              {promoError}
+            </p>
+          )}
         </div>
 
         {isDemoCheckout && (

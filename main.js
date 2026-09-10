@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -20,6 +20,17 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // External destinations opened with window.open (e.g. the hosted checkout the
+  // upgrade modal uses on desktop) belong in the user's default browser, not in
+  // a bare Electron window. Anything non-http(s) keeps the default behaviour.
+  mainWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) {
+      void shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
   });
 
   // Dev builds (unpackaged) load the Vite dev server; packaged/production

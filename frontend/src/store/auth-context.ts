@@ -10,6 +10,11 @@ import type { Session, User } from '@supabase/supabase-js';
 export const PRO_STORAGE_KEY = 'pdfeditor.pro';
 /** Device entitlement granted by a successful guest checkout or promo code. */
 export const LOCAL_PRO_UNLOCKED_KEY = 'pro_unlocked';
+/**
+ * Device entitlement written by every Pro unlock path (web checkout, desktop
+ * hand-off, promo code / license key) and read back on the next launch.
+ */
+export const LOCAL_PRO_ACCESS_KEY = 'has_pro_access';
 
 /**
  * Per-device free-trial counter. Persisted in localStorage so the 3 free uses
@@ -66,7 +71,8 @@ export function readStoredProStatus(): boolean {
   try {
     return (
       localStorage.getItem(PRO_STORAGE_KEY) === 'true' ||
-      localStorage.getItem(LOCAL_PRO_UNLOCKED_KEY) === 'true'
+      localStorage.getItem(LOCAL_PRO_UNLOCKED_KEY) === 'true' ||
+      localStorage.getItem(LOCAL_PRO_ACCESS_KEY) === 'true'
     );
   } catch {
     return false;
@@ -78,9 +84,11 @@ export function persistProStatus(isPro: boolean): void {
     if (isPro) {
       localStorage.setItem(PRO_STORAGE_KEY, 'true');
       localStorage.setItem(LOCAL_PRO_UNLOCKED_KEY, 'true');
+      localStorage.setItem(LOCAL_PRO_ACCESS_KEY, 'true');
     } else {
       localStorage.removeItem(PRO_STORAGE_KEY);
       localStorage.removeItem(LOCAL_PRO_UNLOCKED_KEY);
+      localStorage.removeItem(LOCAL_PRO_ACCESS_KEY);
     }
   } catch {
     // localStorage may be unavailable (private mode / file:// restrictions).
