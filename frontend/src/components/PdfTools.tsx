@@ -17,6 +17,7 @@ import { PdfEditor } from './PdfEditor';
 import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from '../store/auth-context';
 import { FileQueue } from './FileQueue';
 import type { QueuedFile } from './FileQueue';
+import { convertPdfToImages } from '../lib/pdfRenderer';
 
 export type PdfToolId =
   | 'split-pdf'
@@ -128,7 +129,7 @@ function Segmented<T extends string | number>({
 interface PdfToolsProps {
   /** Which tools are currently processing (drives run-button spinners). */
   busy: Partial<Record<PdfToolId, boolean>>;
-  /** Executes a tool. The parent applies trial gating + sends IPC payloads. */
+  /** Executes a tool after applying the app's trial gating. */
   onRunTool: (opId: PdfToolId, files: QueuedFile[], options: Record<string, unknown>) => void;
   /** Opens the upgrade modal when a free-trial gate blocks a client-side tool. */
   onRequireUpgrade?: (message?: string) => void;
@@ -140,7 +141,7 @@ const COMPRESSION_PRESETS: SegOption<CompressionPreset>[] = [
   { value: 'high', label: 'High (Max Compression)' },
 ];
 
-/** Front-end presets → Ghostscript -dPDFSETTINGS values (see backend/compressTools.js). */
+/** Front-end compression presets used by the browser-side tool flow. */
 const COMPRESSION_TO_PRESET: Record<CompressionPreset, string> = {
   low: 'printer',
   medium: 'ebook',
@@ -460,16 +461,69 @@ function PdfToImagePanel({
   onRemoveFile,
   onClear,
   onMove,
-  onRun,
 }: QueuePanelProps) {
   const [format, setFormat] = useState<ImageFormat>('png');
   const [dpi, setDpi] = useState(150);
   const [quality, setQuality] = useState(80);
 
-  const options: Record<string, unknown> = {
-    format,
-    dpi,
-    quality,
+  const [converting, setConverting] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0, file: 0, files: 0 });
+  const [conversionError, setConversionError] = useState('');
+
+  const downloadImage = async (dataUrl: string, fileName: string, pageNumber: number) => {
+    let outputUrl = dataUrl;
+    let extension = 'png';
+
+    if (format === 'jpeg') {
+      const image = new Image();
+      image.src = dataUrl;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas rendering is unavailable in this environment.');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0);
+      outputUrl = canvas.toDataURL('image/jpeg', quality / 100);
+      extension = 'jpg';
+    }
+
+    const link = document.createElement('a');
+    link.href = outputUrl;
+    link.download = `${fileName.replace(/\.pdf$/i, '')}-page-${pageNumber}.${extension}`;
+    link.click();
+  };
+
+  const handleConvert = async () => {
+    const sourceFiles = files
+      .map((queuedFile) => queuedFile.file)
+      .filter((file): file is File => Boolean(file));
+    if (sourceFiles.length !== files.length) {
+      setConversionError('Please select the PDFs again so they can be processed in the browser.');
+      return;
+    }
+
+    setConverting(true);
+    setConversionError('');
+    setProgress({ current: 0, total: 0, file: 0, files: sourceFiles.length });
+
+    try {
+      for (let fileIndex = 0; fileIndex < sourceFiles.length; fileIndex += 1) {
+        const sourceFile = sourceFiles[fileIndex];
+        const images = await convertPdfToImages(sourceFile, dpi / 72, (current, total) => {
+          setProgress({ current, total, file: fileIndex + 1, files: sourceFiles.length });
+        });
+        for (let pageIndex = 0; pageIndex < images.length; pageIndex += 1) {
+          await downloadImage(images[pageIndex], sourceFile.name, pageIndex + 1);
+        }
+      }
+    } catch (error) {
+      setConversionError(error instanceof Error ? error.message : 'The PDF could not be converted.');
+    } finally {
+      setConverting(false);
+    }
   };
 
   return (
@@ -529,10 +583,31 @@ function PdfToImagePanel({
 
       <ActionRunButton
         label="Convert to Images"
-        processing={processing}
+        processing={processing || converting}
         disabled={files.length === 0}
-        onClick={() => onRun(options)}
+        onClick={() => void handleConvert()}
       />
+
+      {converting && progress.total > 0 && (
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>
+              Rendering file {progress.file} of {progress.files}
+            </span>
+            <span>
+              Page {progress.current} of {progress.total}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+            <div
+              className="h-full bg-indigo-500 transition-[width] duration-150"
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {conversionError && <p className="text-sm text-red-300">{conversionError}</p>}
     </div>
   );
 }
@@ -636,8 +711,8 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ busy, onRunTool, onRequireUp
 
   const addFiles = (id: PdfToolId, incoming: QueuedFile[]) =>
     setQueues((current) => {
-      const known = new Set(current[id].map((file) => file.path || file.name));
-      const added = incoming.filter((file) => !known.has(file.path || file.name));
+      const known = new Set(current[id].map((file) => file.name));
+      const added = incoming.filter((file) => !known.has(file.name));
       return { ...current, [id]: [...current[id], ...added] };
     });
 

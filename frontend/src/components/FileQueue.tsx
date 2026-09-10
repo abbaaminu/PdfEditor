@@ -12,45 +12,23 @@ import {
 
 export interface QueuedFile {
   name: string;
-  /** Absolute OS-native path (from Electron webUtils) or undefined in a browser. */
-  path?: string;
+  /** Original browser file, retained for client-side document processing. */
+  file?: File;
 }
 
 interface FileQueueProps {
   title: string;
-  /** Native `<input accept>` string, e.g. ".pdf,application/pdf". */
   accept: string;
   files: QueuedFile[];
   onAddFiles: (files: QueuedFile[]) => void;
   onRemoveFile: (index: number) => void;
   onClear: () => void;
-  /** Move one row to another index (clamped). Also used by drag & drop. */
   onMove: (fromIndex: number, toIndex: number) => void;
   multiple?: boolean;
   emptyHint?: string;
   disabled?: boolean;
 }
 
-/** Last path segment helper that understands both Windows and POSIX separators. */
-function dirName(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  const slash = normalized.lastIndexOf('/');
-  return slash >= 0 ? normalized.slice(0, slash) : filePath;
-}
-
-function resolvePathForFile(file: File): string | undefined {
-  const bridge = (window as unknown as { electron?: { getPathForFile?: (f: File) => string } }).electron;
-  if (bridge?.getPathForFile) {
-    try {
-      return bridge.getPathForFile(file);
-    } catch {
-      /* fall back to the legacy File.path below */
-    }
-  }
-  return (file as unknown as { path?: string }).path;
-}
-
-/** Allowed extensions extracted from an `accept` attribute (e.g. ".pdf"). */
 function allowedExtensions(accept: string): string[] {
   return accept
     .split(',')
@@ -58,11 +36,6 @@ function allowedExtensions(accept: string): string[] {
     .filter((part) => part.startsWith('.'));
 }
 
-/**
- * Appendable, reorderable file queue used by the PDF suite. Clicking "Add More
- * Files…" opens the OS picker again without clearing existing entries, so users
- * can assemble files from several folders before running an action.
- */
 export const FileQueue: React.FC<FileQueueProps> = ({
   title,
   accept,
@@ -90,21 +63,16 @@ export const FileQueue: React.FC<FileQueueProps> = ({
           extensions.length === 0 ||
           extensions.includes(`.${file.name.split('.').pop()?.toLowerCase()}`)
       )
-      .map((file) => ({
-        name: file.name,
-        path: resolvePathForFile(file),
-      }));
+      .map((file) => ({ name: file.name, file }));
     onAddFiles(added);
   };
 
   const openPicker = () => {
-    if (disabled) return;
-    inputRef.current?.click();
+    if (!disabled) inputRef.current?.click();
   };
 
   const move = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    onMove(fromIndex, toIndex);
+    if (fromIndex !== toIndex) onMove(fromIndex, toIndex);
   };
 
   return (
@@ -142,7 +110,7 @@ export const FileQueue: React.FC<FileQueueProps> = ({
             <ul className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
               {files.map((file, index) => (
                 <li
-                  key={`${file.path ?? file.name}-${index}`}
+                  key={`${file.name}-${index}`}
                   draggable={!disabled}
                   onDragStart={(event) => {
                     dragIndexRef.current = index;
@@ -166,15 +134,7 @@ export const FileQueue: React.FC<FileQueueProps> = ({
                       <span className="mr-1.5 text-slate-500">{index + 1}.</span>
                       {file.name}
                     </p>
-                    {file.path ? (
-                      <p className="truncate text-[10px] text-slate-500" title={file.path}>
-                        {dirName(file.path)}
-                      </p>
-                    ) : (
-                      <p className="text-[10px] italic text-amber-400/80">
-                        path unavailable in browser mode
-                      </p>
-                    )}
+                    <p className="text-[10px] text-slate-500">Ready for browser processing</p>
                   </div>
                   <span className="hidden items-center gap-0.5 group-hover:flex">
                     <button
@@ -218,19 +178,16 @@ export const FileQueue: React.FC<FileQueueProps> = ({
                 disabled={disabled}
                 className="flex items-center gap-1.5 rounded-lg border border-indigo-500/50 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-500/20 disabled:opacity-60"
               >
-                <Plus className="h-3.5 w-3.5" />
-                Add More Files…
+                <Plus className="h-3.5 w-3.5" /> Add More Files…
               </button>
               <span className="text-[11px] text-slate-500">
                 {multiple
-                  ? 'Drag rows to change the order. Files from any folder can be appended.'
+                  ? 'Drag rows to change the order. Files stay in the browser.'
                   : 'Keep adding until your list is complete.'}
               </span>
             </div>
           </div>
         )}
-
-        {/* Hidden native picker; clicking the buttons re-opens it every time. */}
         <input
           ref={inputRef}
           type="file"

@@ -3,7 +3,7 @@
 //
 // Parses Word documents with `mammoth` (raw text extraction) and lays the
 // content out into clean A4 pages with `pdf-lib`. Runs entirely in the
-// renderer (works in Electron and in plain-browser dev) and gates each
+// renderer (works in the browser) and gates each
 // conversion behind the free-trial usage policy.
 
 import React, { useRef, useState } from 'react';

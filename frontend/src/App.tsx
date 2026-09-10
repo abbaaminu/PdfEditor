@@ -1,12 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ComponentType } from 'react';
+import { useState } from 'react';
 import {
-  Archive,
   BadgeCheck,
   FilePlus,
   FileText,
-  Image as ImageIcon,
-  Layers,
   Scissors,
   Sparkles,
 } from 'lucide-react';
@@ -21,99 +17,58 @@ import { UpgradeModal } from './components/UpgradeModal';
 import { WordViewer } from './components/WordViewer';
 import { AuthProvider } from './store/AuthProvider';
 import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from './store/auth-context';
+import { PDFDocument } from 'pdf-lib';
 
 type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
 
-interface ElectronBridge {
-  send?: (channel: string, data?: unknown) => void;
-  on?: (channel: string, listener: (...args: unknown[]) => void) => () => void;
-  invoke?: (channel: string, data?: unknown) => Promise<unknown>;
-  getPathForFile?: (file: File) => string;
-}
-
-interface LegacyRenderer {
-  on: (channel: string, listener: (...args: unknown[]) => void) => void;
-  removeListener: (channel: string, listener: (...args: unknown[]) => void) => void;
-  send: (channel: string, data?: unknown) => void;
-}
-
-function getBridge(): ElectronBridge | null {
-  return (window as unknown as { electron?: ElectronBridge }).electron ?? null;
-}
-
-function getLegacyRenderer(): LegacyRenderer | null {
-  const withRequire = window as unknown as {
-    require?: (module: string) => { ipcRenderer?: LegacyRenderer };
-  };
-  try {
-    return withRequire.require?.('electron').ipcRenderer ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** PDF-tool ids shared with <PdfTools/>. Only the IPC subset runs in main. */
 type ToolId = PdfToolId;
-
-interface ToolDefinition {
-  id: ToolId;
-  label: string;
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-  busyLabel: string;
-}
-
-const TOOLS: ToolDefinition[] = [
-  {
-    id: 'split-pdf',
-    label: 'Split PDF',
-    description: 'Extract page ranges into a new document',
-    icon: Scissors,
-    busyLabel: 'Splitting…',
-  },
-  {
-    id: 'compress-pdf',
-    label: 'Compress PDF',
-    description: 'Optimize and shrink document file size',
-    icon: Archive,
-    busyLabel: 'Compressing…',
-  },
-  {
-    id: 'merge-pdf',
-    label: 'Merge PDFs',
-    description: 'Combine multiple PDF files into one',
-    icon: Layers,
-    busyLabel: 'Merging…',
-  },
-  {
-    id: 'convert-pdf-images',
-    label: 'PDF to Images',
-    description: 'Convert document pages into image files',
-    icon: ImageIcon,
-    busyLabel: 'Extracting…',
-  },
-  {
-    id: 'images-to-pdf',
-    label: 'Images to PDF',
-    description: 'Assemble selected images into a PDF file',
-    icon: FileText,
-    busyLabel: 'Assembling…',
-  },
-];
 
 type BusyMap = Partial<Record<ToolId, boolean>>;
 
-/**
- * Tools that may emit a `*-cancelled` event: they open their output picker
- * (save dialog / folder dialog) *after* the `*-processing` event, so a cancel
- * there must clear the processing state. The other tools finish all dialogs
- * before emitting `*-processing` and therefore never send `*-cancelled`.
- */
-const CANCEL_AWARE_TOOLS: ReadonlySet<ToolId> = new Set([
-  'split-pdf',
-  'compress-pdf',
-  'merge-pdf',
-]);
+function downloadPdf(bytes: Uint8Array, fileName: string): void {
+  const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function parsePageRanges(value: string, total: number): number[] {
+  const pages = new Set<number>();
+  value.split(',').forEach((part) => {
+    const [startText, endText] = part.trim().split('-');
+    const start = Math.max(1, Number.parseInt(startText, 10));
+    const end = Math.min(total, Number.parseInt(endText ?? startText, 10));
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      for (let page = Math.min(start, end); page <= Math.max(start, end); page += 1) pages.add(page);
+    }
+  });
+  return [...pages].sort((a, b) => a - b);
+}
+
+async function mergePdfFiles(files: File[]): Promise<Uint8Array> {
+  const output = await PDFDocument.create();
+  for (const file of files) {
+    const source = await PDFDocument.load(await file.arrayBuffer());
+    const pages = await output.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => output.addPage(page));
+  }
+  return output.save();
+}
+
+async function imagesToPdf(files: File[]): Promise<Uint8Array> {
+  const output = await PDFDocument.create();
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const image = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
+      ? await output.embedPng(bytes)
+      : await output.embedJpg(bytes);
+    const page = output.addPage([image.width, image.height]);
+    page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+  }
+  return output.save();
+}
 
 export default function App() {
   return (
@@ -133,11 +88,6 @@ function Dashboard() {
   const [upgradeMessage, setUpgradeMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<BusyMap>({});
 
-  // Tracks how many in-flight PDF-tool actions were started on the free trial,
-  // per tool, so each *success* event increments the device counter exactly
-  // once — errors/cancels only release their reservation and never count.
-  const pendingTrialRef = useRef<Partial<Record<ToolId, number>>>({});
-
   const openUpgradeModal = (message?: string) => {
     setUpgradeMessage(message);
     setIsUpgradeOpen(true);
@@ -148,83 +98,11 @@ function Dashboard() {
     setIsUpgradeOpen(false);
   };
 
-  // ---- IPC events -> toasts + in-context busy indicators --------------------
-  useEffect(() => {
-    const bridge = getBridge();
-    const legacy = getLegacyRenderer();
-
-    const markRunning = (opId: ToolId, running: boolean) =>
-      setBusy((current) => ({ ...current, [opId]: running }));
-
-    // A trial action only consumes a use when its success event arrives; errors
-    // and user-cancels never count against the 3-use budget.
-    const settleTrialOp = (opId: ToolId, success: boolean) => {
-      const pending = pendingTrialRef.current[opId] ?? 0;
-      if (pending <= 0) return;
-      pendingTrialRef.current[opId] = pending - 1;
-      if (success) incrementUsage();
-    };
-
-    const registerTool = (opId: ToolId): (() => void) => {
-      const subscribe = (
-        suffix: 'processing' | 'success' | 'error' | 'cancelled',
-        handler: (message: string) => void
-      ) => {
-        const channel = `${opId}-${suffix}`;
-        if (bridge?.on) {
-          return bridge.on(channel, (msg: unknown) => handler(String(msg)));
-        }
-        if (legacy) {
-          const listener = (_event: unknown, msg: unknown) => handler(String(msg));
-          legacy.on(channel, listener);
-          return () => legacy.removeListener(channel, listener);
-        }
-        return () => undefined;
-      };
-
-      const removeProcessing = subscribe('processing', (message) => {
-        toast.processing(message, `${opId}:processing`);
-        markRunning(opId, true);
-      });
-      const removeSuccess = subscribe('success', (message) => {
-        settleTrialOp(opId, true);
-        toast.dismissKey(`${opId}:processing`);
-        toast.success(message || 'Operation completed successfully.', {
-          key: `${opId}:result`,
-        });
-        markRunning(opId, false);
-      });
-      const removeError = subscribe('error', (message) => {
-        settleTrialOp(opId, false);
-        toast.dismissKey(`${opId}:processing`);
-        toast.error(message || 'The operation failed.', {
-          key: `${opId}:result`,
-        });
-        markRunning(opId, false);
-      });
-      const removeCancelled = CANCEL_AWARE_TOOLS.has(opId)
-        ? subscribe('cancelled', () => {
-            settleTrialOp(opId, false);
-            toast.dismissKey(`${opId}:processing`);
-            markRunning(opId, false);
-          })
-        : () => undefined;
-
-      return () => {
-        removeProcessing();
-        removeSuccess();
-        removeError();
-        removeCancelled();
-      };
-    };
-
-    const removeAll = TOOLS.map((tool) => registerTool(tool.id));
-    return () => removeAll.forEach((remove) => remove());
-  }, [toast, incrementUsage]);
+  // Tool actions update busy and toast state locally after browser processing.
 
   // ---- Tool invocation -------------------------------------------------------
   // Runs a PDF tool with the queue + options collected in <PdfTools/>.
-  const executeTool = (opId: ToolId, files: QueuedFile[], options: Record<string, unknown>) => {
+  const executeTool = async (opId: ToolId, files: QueuedFile[], options: Record<string, unknown>) => {
     // Word-to-PDF and the PDF Editor run entirely in the renderer; they use
     // their own panels and never need the Electron IPC pipeline.
     if (opId === 'word-to-pdf' || opId === 'edit-pdf') {
@@ -239,12 +117,12 @@ function Dashboard() {
       return;
     }
 
-    const filePaths = files
-      .map((file) => file.path)
-      .filter((filePath): filePath is string => Boolean(filePath));
+    const sourceFiles = files
+      .map((file) => file.file)
+      .filter((file): file is File => Boolean(file));
 
     const minimumFiles = opId === 'merge-pdf' ? 2 : 1;
-    if (filePaths.length < minimumFiles) {
+    if (sourceFiles.length < minimumFiles) {
       toast.error(
         opId === 'merge-pdf'
           ? 'Add at least two PDF files to merge.'
@@ -253,28 +131,43 @@ function Dashboard() {
       return;
     }
 
-    const payload = { files: filePaths, options: options ?? {} };
-    const startedOnTrial = !isProUser;
-
-    const bridge = getBridge();
-    if (bridge?.send) {
-      bridge.send(opId, payload);
-      if (startedOnTrial) {
-        pendingTrialRef.current[opId] = (pendingTrialRef.current[opId] ?? 0) + 1;
+    setBusy((current) => ({ ...current, [opId]: true }));
+    toast.processing('Processing in your browser…', `${opId}:processing`);
+    try {
+      if (opId === 'merge-pdf') {
+        downloadPdf(await mergePdfFiles(sourceFiles), 'merged.pdf');
+      } else if (opId === 'images-to-pdf') {
+        downloadPdf(await imagesToPdf(sourceFiles), 'images.pdf');
+      } else if (opId === 'compress-pdf') {
+        const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
+        downloadPdf(await source.save(), `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`);
+      } else if (opId === 'split-pdf') {
+        const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
+        const mode = String(options.mode ?? 'all');
+        const groups: number[][] = [];
+        if (mode === 'extract') groups.push(parsePageRanges(String(options.rangesText ?? ''), source.getPageCount()).map((page) => page - 1));
+        else if (mode === 'every-n') {
+          const size = Math.max(1, Number(options.everyN) || 1);
+          for (let start = 0; start < source.getPageCount(); start += size) {
+            groups.push(Array.from({ length: Math.min(size, source.getPageCount() - start) }, (_, index) => start + index));
+          }
+        } else groups.push(...Array.from({ length: source.getPageCount() }, (_, index) => [index]));
+        for (let index = 0; index < groups.length; index += 1) {
+          const output = await PDFDocument.create();
+          const pages = await output.copyPages(source, groups[index]);
+          pages.forEach((page) => output.addPage(page));
+          downloadPdf(await output.save(), `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-part-${index + 1}.pdf`);
+        }
       }
-      return;
+      if (!isProUser) incrementUsage();
+      toast.dismissKey(`${opId}:processing`);
+      toast.success('Operation completed in your browser.', { key: `${opId}:result` });
+    } catch (error) {
+      toast.dismissKey(`${opId}:processing`);
+      toast.error(error instanceof Error ? error.message : 'The browser operation failed.', { key: `${opId}:result` });
+    } finally {
+      setBusy((current) => ({ ...current, [opId]: false }));
     }
-    const legacy = getLegacyRenderer();
-    if (legacy) {
-      legacy.send(opId, payload);
-      if (startedOnTrial) {
-        pendingTrialRef.current[opId] = (pendingTrialRef.current[opId] ?? 0) + 1;
-      }
-      return;
-    }
-    toast.error(
-      'Electron IPC is unavailable in browser mode. Open this page inside the Electron desktop app.'
-    );
   };
 
 

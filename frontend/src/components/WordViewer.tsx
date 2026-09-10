@@ -1,27 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { CircleAlert, FileText, FolderOpen, LoaderCircle, Upload } from 'lucide-react';
+import { CircleAlert, FileText, LoaderCircle, Upload } from 'lucide-react';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
-
-type ElectronBridge = {
-  invoke?: (channel: string, data?: unknown) => Promise<unknown>;
-};
-
-type DocxDialogResult = {
-  canceled: boolean;
-  fileName?: string;
-  filePath?: string;
-  base64?: string;
-  error?: string;
-};
-
-/** Decode the base64 file contents sent over IPC into an ArrayBuffer. */
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer as ArrayBuffer;
-}
 
 /**
  * Sanitize mammoth-generated HTML before it is injected with
@@ -73,11 +53,6 @@ export const WordViewer: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  const [canUseElectronDialog] = useState<boolean>(() => {
-    const electron = (window as unknown as { electron?: ElectronBridge }).electron;
-    return typeof electron?.invoke === 'function';
-  });
-
   const renderDocument = async (arrayBuffer: ArrayBuffer) => {
     const isolatedBytes = new Uint8Array(arrayBuffer).slice();
     const result = await mammoth.convertToHtml({ arrayBuffer: isolatedBytes.buffer });
@@ -85,36 +60,9 @@ export const WordViewer: React.FC = () => {
     requestAnimationFrame(() => previewRef.current?.scrollTo({ top: 0 }));
   };
 
-  const handleOpenClick = async () => {
+  const handleOpenClick = () => {
     setError('');
-    const electron = (window as unknown as { electron?: ElectronBridge }).electron;
-
-    // Fallback for browser-only development: use a hidden file input.
-    if (!electron?.invoke) {
-      fileInputRef.current?.click();
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      const result = (await electron.invoke('open-docx-dialog')) as DocxDialogResult;
-      if (result.canceled) return;
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (!result.base64) {
-        setError('The selected file did not contain any data.');
-        return;
-      }
-
-      setFileName(result.fileName ?? 'document.docx');
-      await renderDocument(base64ToArrayBuffer(result.base64).slice(0));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open the Word document.');
-    } finally {
-      setIsLoading(false);
-    }
+    fileInputRef.current?.click();
   };
 
   const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,15 +100,10 @@ export const WordViewer: React.FC = () => {
           disabled={isLoading}
           className="flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {canUseElectronDialog ? (
-            <FolderOpen className="h-4 w-4" />
-          ) : (
-            <Upload className="h-4 w-4" />
-          )}
-          {canUseElectronDialog ? 'Open .docx File…' : 'Choose .docx File'}
+          <Upload className="h-4 w-4" />
+          Choose .docx File
         </button>
 
-        {/* Browser fallback picker (used when the Electron dialog is unavailable). */}
         <input
           ref={fileInputRef}
           type="file"

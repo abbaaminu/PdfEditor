@@ -3,7 +3,7 @@ import { CloudUpload, FileText, X } from 'lucide-react';
 
 export interface DroppedPdfFile {
   name: string;
-  path?: string;
+  file: File;
 }
 
 interface PdfDropZoneProps {
@@ -11,20 +11,6 @@ interface PdfDropZoneProps {
   onAddFiles: (files: DroppedPdfFile[]) => void;
   onRemoveFile: (index: number) => void;
   onClearFiles: () => void;
-}
-
-type ElectronBridge = { getPathForFile?: (file: File) => string };
-
-function resolvePathForFile(file: File): string | undefined {
-  const bridge = (window as unknown as { electron?: ElectronBridge }).electron;
-  if (bridge?.getPathForFile) {
-    try {
-      return bridge.getPathForFile(file);
-    } catch {
-      /* fall back to the legacy File.path below */
-    }
-  }
-  return (file as unknown as { path?: string }).path;
 }
 
 const hasFiles = (event: React.DragEvent): boolean =>
@@ -51,12 +37,8 @@ export const PdfDropZone: React.FC<PdfDropZoneProps> = ({
 
     const dropped = Array.from(event.dataTransfer.files || [])
       .filter((file) => file.name.toLowerCase().endsWith('.pdf'))
-      .map((file) => ({
-        name: file.name,
-        path: resolvePathForFile(file),
-      }));
-    if (dropped.length === 0) return;
-    onAddFiles(dropped);
+      .map((file) => ({ name: file.name, file }));
+    if (dropped.length > 0) onAddFiles(dropped);
   };
 
   return (
@@ -116,18 +98,13 @@ export const PdfDropZone: React.FC<PdfDropZoneProps> = ({
           <ul className="max-h-32 space-y-1.5 overflow-y-auto">
             {files.map((file, index) => (
               <li
-                key={`${file.path ?? file.name}-${index}`}
+                key={`${file.name}-${index}`}
                 className="flex items-center gap-2 rounded-lg bg-slate-800/70 px-3 py-2 text-xs text-slate-300"
               >
                 <FileText className="h-4 w-4 shrink-0 text-indigo-400" />
                 <span className="flex-1 truncate" title={file.name}>
                   {file.name}
                 </span>
-                {!file.path && (
-                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-400">
-                    path unavailable
-                  </span>
-                )}
                 <button
                   type="button"
                   aria-label={`Remove ${file.name}`}
@@ -141,8 +118,7 @@ export const PdfDropZone: React.FC<PdfDropZoneProps> = ({
           </ul>
 
           <p className="pt-1 text-[11px] leading-relaxed text-slate-500">
-            Split, Compress and PDF→Images act on the first dropped file. Merge
-            combines every dropped PDF in the listed order.
+            Files are processed entirely in your browser.
           </p>
         </div>
       )}
