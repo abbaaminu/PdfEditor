@@ -10,6 +10,7 @@ import React, { useRef, useState } from 'react';
 import { FileText, LoaderCircle, Play, Trash2, Upload } from 'lucide-react';
 import mammoth from 'mammoth';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
 import { useToast } from './toast-context';
 
 interface WordToPdfPanelProps {
@@ -24,17 +25,6 @@ const A4_HEIGHT = 841.89;
 const MARGIN = 56;
 const LINE_HEIGHT = 16;
 const BODY_SIZE = 11;
-
-/** Keep text compatible with pdf-lib's WinAnsi Helvetica font encoding. */
-function sanitizeWinAnsiText(value: string): string {
-  return value
-    .replace(/\ufb01/g, 'fi')
-    .replace(/\ufb02/g, 'fl')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, '-')
-    .replace(/[^\x00-\xFF]/g, '');
-}
 
 /** Split paragraphs into word-wrapped lines that fit the usable page width. */
 function wrapLines(

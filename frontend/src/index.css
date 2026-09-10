@@ -201,6 +201,46 @@ body {
 }
 
 /* ==========================================================================
+   Word Viewer – docx-preview output styled as white document pages
+   (`.docx-wrapper > section.docx` is one page per section)
+   ========================================================================== */
+.wv-pages .docx-wrapper {
+  background: transparent;
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+  padding: 0;
+}
+
+.wv-pages .docx-wrapper > section.docx,
+.wv-pages .docx-wrapper .docx-page {
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 4px;
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.55);
+  /* docx-preview sets width/padding inline from the document's page setup, so
+     only the surrounding "paper" treatment is overridden here. */
+  margin: 0 auto 1.5rem;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.wv-pages .docx-wrapper > section.docx:last-child {
+  margin-bottom: 0;
+}
+
+.wv-pages img,
+.wv-pages svg,
+.wv-pages table {
+  max-width: 100%;
+}
+
+.wv-pages table {
+  border-collapse: collapse;
+}
+
+
+/* ==========================================================================
    Toast notifications
    ========================================================================== */
 @keyframes toast-pop {

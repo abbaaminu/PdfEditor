@@ -19,6 +19,7 @@ import { AuthProvider } from './store/AuthProvider';
 import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from './store/auth-context';
 import { PDFDocument } from 'pdf-lib';
 import { compressPdfToPdf } from './lib/pdfRenderer';
+import type { CompressionPresetKey } from './lib/pdfRenderer';
 
 type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
 
@@ -31,8 +32,12 @@ function downloadPdf(bytes: Uint8Array, fileName: string): void {
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // Revoking synchronously can abort the download before it starts.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function parsePageRanges(value: string, total: number): number[] {
@@ -133,8 +138,14 @@ function Dashboard() {
       } else if (opId === 'images-to-pdf') {
         downloadPdf(await imagesToPdf(sourceFiles), 'images.pdf');
       } else if (opId === 'compress-pdf') {
+        // The panel sends backend-style preset names + a 10–90% JPEG quality.
+        const presetInput = typeof options.preset === 'string' ? options.preset : '';
+        const preset: CompressionPresetKey =
+          presetInput === 'printer' || presetInput === 'screen' ? presetInput : 'ebook';
+        const quality =
+          typeof options.quality === 'number' ? options.quality / 100 : undefined;
         downloadPdf(
-          await compressPdfToPdf(sourceFiles[0]),
+          await compressPdfToPdf(sourceFiles[0], { preset, quality }),
           `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`
         );
       } else if (opId === 'split-pdf') {

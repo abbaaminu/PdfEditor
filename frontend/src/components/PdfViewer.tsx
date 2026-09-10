@@ -21,7 +21,7 @@ import {
   RotateCw,
   Upload,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { loadPdfDocument } from '../lib/pdfjs';
 import { renderPdfPageToCanvas } from '../lib/pdfRenderer';
 
 const MIN_ZOOM = 0.5;
@@ -48,6 +48,8 @@ export const PdfViewer: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** Keeps the current pdf.js loading task so it can be destroyed on change/unmount. */
+  const documentTaskRef = useRef<ReturnType<typeof loadPdfDocument> | null>(null);
 
   const [fileName, setFileName] = useState('');
   const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
@@ -81,6 +83,13 @@ export const PdfViewer: React.FC = () => {
   }, [fileBuffer, pageNumber, pageCount, rotation, zoom]);
 
 
+  useEffect(() => {
+    return () => {
+      void documentTaskRef.current?.destroy();
+      documentTaskRef.current = null;
+    };
+  }, []);
+
   const loadFile = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
       setError('Please choose a PDF file.');
@@ -99,7 +108,10 @@ export const PdfViewer: React.FC = () => {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      // Drop the previous document/worker pair before opening the next one.
+      void documentTaskRef.current?.destroy();
+      const loadingTask = loadPdfDocument(arrayBuffer);
+      documentTaskRef.current = loadingTask;
       const document = await loadingTask.promise;
       setPageCount(document.numPages);
       setFileBuffer(arrayBuffer.slice(0));
@@ -266,16 +278,24 @@ export const PdfViewer: React.FC = () => {
         }`}
       >
 
-        {isLoading ? (
+        {isLoading && !hasDocument ? (
           <div className="flex items-center gap-2 py-20 text-sm text-slate-400">
             <LoaderCircle className="h-5 w-5 animate-spin text-indigo-400" /> Loading PDF…
           </div>
         ) : hasDocument ? (
-          <div className="shrink-0">
+          <div className="relative shrink-0">
             <p className="mb-1.5 text-center text-[11px] font-medium text-slate-500">
               Page {pageNumber} of {pageCount}
             </p>
             <canvas ref={canvasRef} className="block bg-white shadow-2xl" />
+            {/* Overlay (instead of swapping the branch) so the canvas element
+                stays mounted while a page renders — replacing it would draw
+                into a detached node and leave the viewer blank. */}
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center rounded bg-slate-950/40">
+                <LoaderCircle className="h-6 w-6 animate-spin text-indigo-300" />
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 text-center">

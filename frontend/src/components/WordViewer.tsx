@@ -1,51 +1,106 @@
-import React, { useRef, useState } from 'react';
+// frontend/src/components/WordViewer.tsx
+// .docx reader built on docx-preview.
+//
+// The rendered markup is a stack of `<section class="docx">` pages inside a
+// `.docx-wrapper` container. The scroll container measures those page nodes
+// directly (via getBoundingClientRect, so it does not matter which ancestor is
+// the offset parent) to keep the "Page X of Y" indicator in sync.
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CircleAlert, FileText, LoaderCircle, Upload } from 'lucide-react';
 import { renderAsync } from 'docx-preview';
+
+/** Page nodes emitted by docx-preview (`section.docx`) plus docxjs fallback. */
+const PAGE_SELECTOR = '.docx-wrapper > section, .docx-wrapper .docx-page';
+
+/** Pixels of tolerance used when deciding which page is "current". */
+const PAGE_TOLERANCE = 24;
+
+function collectPageNodes(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll<HTMLElement>(PAGE_SELECTOR));
+}
 
 export const WordViewer: React.FC = () => {
   const [fileName, setFileName] = useState('');
   const [hasContent, setHasContent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [pageCount, setPageCount] = useState(0);
-  const [activePage, setActivePage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
-  const renderRef = useRef<HTMLDivElement>(null);
+  /** Scroll container that holds the rendered pages. */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Container docx-preview renders the document body into. */
+  const containerRef = useRef<HTMLDivElement>(null);
+  /** Dedicated host for the stylesheet docx-preview injects. */
+  const styleRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef(0);
 
-  const updatePageTracking = (documentLoaded = hasContent) => {
-    const container = previewRef.current;
-    if (!container) return;
-    const sections = Array.from(container.querySelectorAll<HTMLElement>('.docx-wrapper > section'));
-    const total = sections.length || (documentLoaded ? 1 : 0);
-    setPageCount(total);
-    if (total === 0) {
-      setActivePage(1);
+  /**
+   * Counts the rendered pages and works out which one the user is looking at
+   * from the offset of each page relative to the scroll viewport.
+   */
+  const syncPageTracking = useCallback(() => {
+    const pages = collectPageNodes(containerRef.current);
+    setTotalPages(pages.length);
+
+    const scroll = scrollRef.current;
+    if (!scroll || pages.length === 0) {
+      setCurrentPage(1);
       return;
     }
 
-    const viewportTop = container.scrollTop + 24;
-    let current = 0;
-    sections.forEach((section, index) => {
-      if (section.offsetTop <= viewportTop) current = index;
+    const viewportTop = scroll.getBoundingClientRect().top + PAGE_TOLERANCE;
+    let active = 1;
+    pages.forEach((page, index) => {
+      if (page.getBoundingClientRect().top <= viewportTop) active = index + 1;
     });
-    setActivePage(Math.min(current + 1, total));
-  };
+    setCurrentPage(active);
+  }, []);
+
+  /** Throttled scroll listener: page indexes are measured once per frame. */
+  const handleScroll = useCallback(() => {
+    if (scrollFrameRef.current) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = 0;
+      syncPageTracking();
+    });
+  }, [syncPageTracking]);
+
+  // Re-measure when the window (and therefore each page's width) changes.
+  useEffect(() => {
+    const onResize = () => syncPageTracking();
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    };
+  }, [syncPageTracking]);
 
   const renderDocument = async (arrayBuffer: ArrayBuffer) => {
-    const container = renderRef.current;
+    const container = containerRef.current;
     if (!container) return;
-    container.replaceChildren();
-    await renderAsync(arrayBuffer, container, undefined, {
+
+    // Always clear the previously rendered document first.
+    container.innerHTML = '';
+
+    await renderAsync(arrayBuffer, container, styleRef.current ?? undefined, {
       breakPages: true,
       experimental: true,
+      inWrapper: true,
+      ignoreLastRenderedPageBreak: false,
+      renderHeaders: true,
+      renderFooters: true,
     });
+
     setHasContent(true);
-    requestAnimationFrame(() => {
-      previewRef.current?.scrollTo({ top: 0 });
-      updatePageTracking(true);
-    });
+    // Wait a frame so the pages have real geometry, then reset scroll and
+    // re-count the pages.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    syncPageTracking();
   };
 
   const handleOpenClick = () => {
@@ -61,8 +116,10 @@ export const WordViewer: React.FC = () => {
     setError('');
     setFileName(file.name);
     setHasContent(false);
-    setPageCount(0);
-    setActivePage(1);
+    setTotalPages(0);
+    setCurrentPage(1);
+    containerRef.current?.replaceChildren();
+
     try {
       setIsLoading(true);
       const bytes = new Uint8Array(await file.arrayBuffer()).slice();
@@ -116,24 +173,29 @@ export const WordViewer: React.FC = () => {
       )}
 
       <div
-        ref={previewRef}
-        onScroll={() => updatePageTracking()}
-        className="max-h-[68vh] min-h-[400px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 text-slate-200"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="max-h-[80vh] min-h-[400px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 text-slate-200"
       >
-        {pageCount > 0 && (
+        {totalPages > 0 && (
           <div className="sticky top-0 z-10 mb-4 border-b border-slate-700 bg-slate-900/95 px-2 py-2 text-xs font-semibold text-slate-300 backdrop-blur">
-            Page {activePage} of {pageCount}
+            Page {currentPage} of {totalPages}
           </div>
         )}
-        {isLoading ? (
+        {isLoading && (
           <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-slate-400">
             <LoaderCircle className="h-8 w-8 animate-spin text-indigo-400" />
             <p className="text-sm">Parsing document contents…</p>
           </div>
-        ) : !hasContent ? (
+        )}
+        {!isLoading && !hasContent && (
           <p className="text-slate-500 italic">Select a .docx file to view its contents.</p>
-        ) : null}
-        <div ref={renderRef} className={isLoading || !hasContent ? 'hidden' : 'wv-content'} />
+        )}
+
+        {/* docx-preview writes its generated stylesheet into this host. */}
+        <div ref={styleRef} className="hidden" aria-hidden="true" />
+        {/* Document pages are rendered here as `.docx-wrapper > section`. */}
+        <div ref={containerRef} className="wv-pages" />
       </div>
     </div>
   );

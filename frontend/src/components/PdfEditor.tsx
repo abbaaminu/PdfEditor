@@ -21,9 +21,9 @@ import {
 } from 'lucide-react';
 import { degrees, PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
+import { loadPdfDocument } from '../lib/pdfjs';
+import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
 import { useToast } from './toast-context';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 interface PdfEditorProps {
   canStartAction: () => boolean;
@@ -199,9 +199,12 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
         }
         const size = overlay.fontSize ?? 16;
         const f = overlay.bold ? boldFont : font;
-        const textWidth = f.widthOfTextAtSize(overlay.text ?? '', size);
+        // WinAnsi cannot encode ligatures/smart quotes/emoji, so normalise the
+        // text first — otherwise drawText() throws and the export fails.
+        const label = sanitizeWinAnsiText(overlay.text ?? '');
+        const textWidth = f.widthOfTextAtSize(label, size);
         const baseX = overlay.textAlign === 'center' ? overlay.x + (overlay.w - textWidth) / 2 : overlay.textAlign === 'right' ? overlay.x + overlay.w - textWidth : overlay.x;
-        page.drawText(overlay.text ?? '', { x: baseX, y: height - overlay.y - size, size, font: f, color: rgb(c.r, c.g, c.b) });
+        page.drawText(label, { x: baseX, y: height - overlay.y - size, size, font: f, color: rgb(c.r, c.g, c.b) });
       }
     }
   }
@@ -496,13 +499,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
       const raw = await file.arrayBuffer();
       const fileBytes = new Uint8Array(raw);
       setOriginalPdfBytes(fileBytes.slice());
-      const task = pdfjsLib.getDocument({
-        data: fileBytes.slice(0),
-        isEvalSupported: false,
-        cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/',
-      });
+      const task = loadPdfDocument(fileBytes);
       task.onPassword = () => setError('This PDF is password-protected. Password entry is not supported here.');
       loadingTaskRef.current = task;
       const document = await task.promise;
