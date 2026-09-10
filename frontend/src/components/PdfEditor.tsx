@@ -21,11 +21,9 @@ import {
 } from 'lucide-react';
 import { degrees, PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
-// Vite ?url import typed by src/pdf-worker.d.ts.
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { useToast } from './toast-context';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 interface PdfEditorProps {
   canStartAction: () => boolean;

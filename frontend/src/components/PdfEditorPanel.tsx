@@ -22,12 +22,9 @@ import {
 } from 'lucide-react';
 import { degrees, PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
-// Standard Vite URL resolver for the pinned pdfjs-dist worker bundle.
-// (Typed by src/pdf-worker.d.ts.)
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { useToast } from './toast-context';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 interface PdfEditorPanelProps {
   /** Trial gate: true when the user may start exporting an edited PDF. */

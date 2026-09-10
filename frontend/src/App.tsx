@@ -133,7 +133,10 @@ function Dashboard() {
         downloadPdf(await imagesToPdf(sourceFiles), 'images.pdf');
       } else if (opId === 'compress-pdf') {
         const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
-        downloadPdf(await source.save(), `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`);
+        downloadPdf(
+          await source.save({ useObjectStreams: true }),
+          `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`
+        );
       } else if (opId === 'split-pdf') {
         const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
         const mode = String(options.mode ?? 'all');

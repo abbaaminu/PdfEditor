@@ -49,15 +49,41 @@ export const WordViewer: React.FC = () => {
   const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pageCount, setPageCount] = useState(0);
+  const [activePage, setActivePage] = useState(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  const updatePageTracking = (hasContent = Boolean(content)) => {
+    const container = previewRef.current;
+    if (!container) return;
+    const sections = Array.from(
+      container.querySelectorAll<HTMLElement>('.docx-wrapper > section')
+    );
+    const total = sections.length || (hasContent ? 1 : 0);
+    setPageCount(total);
+    if (total === 0) {
+      setActivePage(1);
+      return;
+    }
+
+    const viewportTop = container.scrollTop + 24;
+    let current = 0;
+    sections.forEach((section, index) => {
+      if (section.offsetTop <= viewportTop) current = index;
+    });
+    setActivePage(Math.min(current + 1, total));
+  };
 
   const renderDocument = async (arrayBuffer: ArrayBuffer) => {
     const isolatedBytes = new Uint8Array(arrayBuffer).slice();
     const result = await mammoth.convertToHtml({ arrayBuffer: isolatedBytes.buffer });
     setContent(sanitizeWordHtml(result.value));
-    requestAnimationFrame(() => previewRef.current?.scrollTo({ top: 0 }));
+    requestAnimationFrame(() => {
+      previewRef.current?.scrollTo({ top: 0 });
+      updatePageTracking(true);
+    });
   };
 
   const handleOpenClick = () => {
@@ -126,15 +152,21 @@ export const WordViewer: React.FC = () => {
 
       <div
         ref={previewRef}
+        onScroll={() => updatePageTracking()}
         className="max-h-[68vh] min-h-[400px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 text-slate-200"
       >
+        {pageCount > 0 && (
+          <div className="sticky top-0 z-10 mb-4 border-b border-slate-700 bg-slate-900/95 px-2 py-2 text-xs font-semibold text-slate-300 backdrop-blur">
+            Page {activePage} of {pageCount}
+          </div>
+        )}
         {isLoading ? (
           <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-3 text-slate-400">
             <LoaderCircle className="h-8 w-8 animate-spin text-indigo-400" />
             <p className="text-sm">Parsing document contents…</p>
           </div>
         ) : content ? (
-          <div className="wv-content" dangerouslySetInnerHTML={{ __html: content }} />
+          <div className="docx-wrapper wv-content" dangerouslySetInnerHTML={{ __html: content }} />
         ) : (
           <p className="text-slate-500 italic">Select a .docx file to view its contents.</p>
         )}

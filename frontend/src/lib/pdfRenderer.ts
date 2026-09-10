@@ -1,10 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configure pdfjs-dist web worker for Vite builds
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 export interface RenderPageOptions {
   scale?: number;

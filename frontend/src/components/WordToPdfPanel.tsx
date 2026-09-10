@@ -25,6 +25,17 @@ const MARGIN = 56;
 const LINE_HEIGHT = 16;
 const BODY_SIZE = 11;
 
+/** Keep text compatible with pdf-lib's WinAnsi Helvetica font encoding. */
+function sanitizeWinAnsiText(value: string): string {
+  return value
+    .replace(/\ufb01/g, 'fi')
+    .replace(/\ufb02/g, 'fl')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/[^\x00-\xFF]/g, '');
+}
+
 /** Split paragraphs into word-wrapped lines that fit the usable page width. */
 function wrapLines(
   font: { widthOfTextAtSize(text: string, size: number): number },
@@ -38,7 +49,7 @@ function wrapLines(
     if (current.trim()) lines.push(current.trim());
     current = '';
   };
-  for (const word of text.split(/\s+/)) {
+  for (const word of sanitizeWinAnsiText(text).split(/\s+/)) {
     if (!word) continue;
     const candidate = current ? `${current} ${word}` : word;
     if (font.widthOfTextAtSize(candidate, size) > maxWidth) {
@@ -98,7 +109,7 @@ async function convertDocxToPdf(file: File): Promise<void> {
       const lines = wrapLines(font, paragraph, BODY_SIZE, usableWidth);
       ensureSpace(lines.length + 1);
       for (const line of lines) {
-        page.drawText(line, { x: MARGIN, y, size: BODY_SIZE, font });
+        page.drawText(sanitizeWinAnsiText(line), { x: MARGIN, y, size: BODY_SIZE, font });
         y -= LINE_HEIGHT;
       }
       y -= LINE_HEIGHT * 0.6; // paragraph spacing
