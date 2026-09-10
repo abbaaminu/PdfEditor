@@ -27,11 +27,11 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Frontend Dependencies
-        run: npm install --prefix frontend
-
       - name: Install Root Dependencies
         run: npm install
+
+      - name: Install Frontend Dependencies
+        run: npm install --prefix frontend --ignore-scripts
 
       - name: Build Frontend Assets
         run: npm run build --prefix frontend
