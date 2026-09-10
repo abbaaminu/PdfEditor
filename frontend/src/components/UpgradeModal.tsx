@@ -72,6 +72,26 @@ function getPriceId(billingCycle: BillingCycle): string {
     : yearly || 'pri_yearly_id_here';
 }
 
+/**
+ * Extracts the full, human-readable message from anything Supabase throws.
+ *
+ * `catch (err: any)` + `err.message` is not used because explicit `any` is
+ * rejected by the project's ESLint config, and a plain `err instanceof Error`
+ * check would drop the message from PostgREST errors — those are plain objects
+ * carrying `message`/`details`/`hint`/`code`, not Error instances.
+ */
+function describeError(err: unknown): string {
+  if (typeof err === 'string' && err.trim()) return err;
+  if (err && typeof err === 'object') {
+    const { message } = err as { message?: unknown };
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  if (typeof err === 'number' || typeof err === 'boolean' || typeof err === 'bigint') {
+    return String(err);
+  }
+  return 'Unable to authenticate.';
+}
+
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, message }) => {
   const { isProUser, setProUser, user } = useAuthStore();
   const toast = useToast();
@@ -168,17 +188,36 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return;
       }
 
-      const isPro = await fetchProfileProStatus(result.data.user.id);
+      const userId = result.data.user.id;
+      let isPro = false;
+      let profileError: string | null = null;
+      try {
+        isPro = (await fetchProfileProStatus(userId)) === true;
+      } catch (err) {
+        // Never fail quietly: log the exact PostgREST/Supabase error (message
+        // first, then the raw object for stack/details) and keep it in a
+        // dedicated variable so it is reported as a profile problem rather than
+        // being mistaken for an authentication failure.
+        const profileMessage = describeError(err);
+        console.error('Supabase Profile Error:', profileMessage, err);
+        profileError = profileMessage;
+      }
+
       if (isPro) {
-        localStorage.setItem('has_pro_access', 'true');
+        grantLocalProAccess();
         setProUser(true);
         toast.success('Pro access restored.');
         handleClose();
+      } else if (profileError) {
+        setAuthError(
+          `Signed in, but your Pro status could not be verified: ${profileError}`
+        );
       } else {
         toast.success('Signed in. Your account is not currently Pro.');
       }
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Unable to authenticate.');
+    } catch (err) {
+      setAuthError(describeError(err));
+      console.error('Supabase Auth Error:', describeError(err), err);
     } finally {
       setIsAuthenticating(false);
     }
