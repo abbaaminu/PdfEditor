@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Check, CircleAlert, Crown, LoaderCircle, Sparkles, X } from 'lucide-react';
 import { grantLocalProAccess, verifyPromoCode } from '../lib/promo';
+import { fetchProfileProStatus, supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/auth-context';
 import { useToast } from './toast-context';
 
@@ -12,6 +13,7 @@ interface UpgradeModalProps {
 }
 
 type BillingCycle = 'monthly' | 'yearly';
+type AuthMode = 'login' | 'signup';
 
 /** Minimal structural typing for the Paddle global exposed by the embed script. */
 interface PaddleCheckoutOpenOptions {
@@ -80,6 +82,11 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
   const [promoCode, setPromoCode] = useState('');
   const [promoError, setPromoError] = useState('');
   const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   const sessionActiveRef = useRef(false);
   const demoTimerRef = useRef<number | null>(null);
@@ -134,6 +141,48 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     toast.success('Welcome to Pro! All Pro features are now unlocked on this device.');
     handleClose();
   }, [handleClose, setProUser, toast]);
+
+  const handleAuthSubmit = useCallback(async () => {
+    if (!supabase) {
+      setAuthError('Authentication is not configured on this device.');
+      return;
+    }
+    const email = authEmail.trim();
+    if (!email || authPassword.length < 6) {
+      setAuthError('Enter a valid email and a password with at least 6 characters.');
+      return;
+    }
+
+    setIsAuthenticating(true);
+    setAuthError('');
+    try {
+      const result =
+        authMode === 'login'
+          ? await supabase.auth.signInWithPassword({ email, password: authPassword })
+          : await supabase.auth.signUp({ email, password: authPassword });
+      if (result.error) throw result.error;
+
+      if (!result.data.session || !result.data.user) {
+        toast.success('Account created. Check your email to confirm your account, then log in.');
+        setAuthMode('login');
+        return;
+      }
+
+      const isPro = await fetchProfileProStatus(result.data.user.id);
+      if (isPro) {
+        localStorage.setItem('has_pro_access', 'true');
+        setProUser(true);
+        toast.success('Pro access restored.');
+        handleClose();
+      } else {
+        toast.success('Signed in. Your account is not currently Pro.');
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to authenticate.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, [authEmail, authMode, authPassword, handleClose, setProUser, toast]);
 
   const handleCheckoutEvent = useCallback(
     (event: PaddleEvent) => {
@@ -380,6 +429,69 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
             <span>{message}</span>
           </div>
         )}
+
+        <div className="mt-5 border-t border-slate-800 pt-4">
+          <div className="flex rounded-lg border border-slate-700 bg-slate-800 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError('');
+              }}
+              className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold transition ${
+                authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Log in
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('signup');
+                setAuthError('');
+              }}
+              className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold transition ${
+                authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Sign up
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+              placeholder="Email address"
+              autoComplete="email"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(event) => setAuthPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleAuthSubmit();
+                }
+              }}
+              placeholder="Password"
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              type="button"
+              onClick={() => void handleAuthSubmit()}
+              disabled={isAuthenticating}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-500/50 px-3 py-2 text-sm font-semibold text-indigo-300 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isAuthenticating && <LoaderCircle className="h-4 w-4 animate-spin" />}
+              {authMode === 'login' ? 'Log in' : 'Create account'}
+            </button>
+            {authError && <p className="text-xs text-red-300" role="alert">{authError}</p>}
+          </div>
+        </div>
 
         {/* Plan Switcher */}
         <div className="mt-6 flex justify-center">

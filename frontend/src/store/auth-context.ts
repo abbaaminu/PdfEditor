@@ -47,6 +47,8 @@ export interface AuthStoreValue {
   isProUser: boolean;
   /** Optimistically flips Pro state and persists the local fallback flag. */
   setProUser: (isPro: boolean) => void;
+  /** Re-checks the signed-in user's profiles.is_pro entitlement. */
+  refreshProStatus: () => Promise<boolean>;
   /** Successful free-trial actions completed on this device (0..MAX_FREE_USES). */
   usageCount: number;
   /** Free-trial uses left before the gate locks the app (0 when exhausted). */

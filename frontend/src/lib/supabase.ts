@@ -20,6 +20,18 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl as string, supabaseAnonKey as string)
   : null;
 
+/** Read the signed-in user's Pro entitlement from the profiles table. */
+export async function fetchProfileProStatus(userId: string): Promise<boolean | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('is_pro')
+    .eq('id', userId)
+    .single();
+  if (error) throw error;
+  return data?.is_pro === true;
+}
+
 /** A subscription is "Pro" while it is active or on trial. */
 export function isProStatus(status: string | null | undefined): boolean {
   return status === 'active' || status === 'trialing';

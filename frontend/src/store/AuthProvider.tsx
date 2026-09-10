@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FC, ReactNode } from 'react';
-import type { RealtimeChannel, Session, User } from '@supabase/supabase-js';
-import { isProStatus, isSupabaseConfigured, supabase } from '../lib/supabase';
+import type { Session, User } from '@supabase/supabase-js';
+import { fetchProfileProStatus, isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
   AuthContext,
   LOCAL_PRO_UNLOCKED_KEY,
+  LOCAL_PRO_ACCESS_KEY,
   MAX_FREE_USES,
   PRO_STORAGE_KEY,
   persistProStatus,
@@ -34,78 +35,34 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     if (!client) return;
 
     let disposed = false;
-    let channel: RealtimeChannel | null = null;
-
-    const setProFromStatus = (status: string | null | undefined) => {
-      if (disposed) return;
-      setIsProUser(isProStatus(status) || readStoredProStatus());
-      setIsProLoading(false);
-    };
-
-    /** Subscribe to INSERT/UPDATE/DELETE on this user's subscription row. */
-    const subscribeRealtime = (userId: string) => {
-      if (channel) void client.removeChannel(channel);
-      channel = client
-        .channel(`subscriptions:${userId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'subscriptions',
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const row = payload.new as { status?: string | null } | null;
-            setProFromStatus(row?.status ?? null);
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.warn(`[auth] subscriptions realtime channel (${userId}) ${status}.`);
-          }
-        });
-    };
-
-    /** Query the DB for the user's subscription to decide Pro status. */
+    /** Query the DB for the user's profile to decide Pro status. */
     const fetchProStatus = async (userId: string) => {
       setIsProLoading(true);
-      const { data, error } = await client
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (disposed) return;
-      if (error) {
-        console.error('[auth] failed to load subscription status:', error);
+      try {
+        const isPro = await fetchProfileProStatus(userId);
+        if (disposed) return;
+        if (isPro === true) persistProStatus(true);
+        setIsProUser(isPro === true || readStoredProStatus());
+      } catch (error) {
+        if (disposed) return;
+        console.error('[auth] failed to load profile status:', error);
         setIsProLoading(false);
         return;
       }
-      setProFromStatus(data?.status ?? null);
+      setIsProLoading(false);
     };
 
-    /** Apply a session change: update user state, DB status + realtime. */
+    /** Apply a session change and verify the profile entitlement. */
     const applySession = async (nextSession: Session | null) => {
       if (disposed) return;
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
       userIdRef.current = nextSession?.user?.id ?? null;
       if (nextSession?.user) {
-        subscribeRealtime(nextSession.user.id);
         await fetchProStatus(nextSession.user.id);
       } else {
         // Signed out: fall back to the locally stored flag (demo/dev mode).
         setIsProLoading(false);
-        setIsProUser(readStoredProStatus());
-      }
-    };
-
-    /** Re-read whichever source is currently authoritative. */
-    const syncProStatus = () => {
-      const currentUserId = userIdRef.current;
-      if (currentUserId) {
-        void fetchProStatus(currentUserId);
-      } else {
         setIsProUser(readStoredProStatus());
       }
     };
@@ -136,28 +93,50 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (
         event.key === null ||
         event.key === PRO_STORAGE_KEY ||
-        event.key === LOCAL_PRO_UNLOCKED_KEY
+        event.key === LOCAL_PRO_UNLOCKED_KEY ||
+        event.key === LOCAL_PRO_ACCESS_KEY
       ) {
-        syncProStatus();
+        const currentUserId = userIdRef.current;
+        if (currentUserId) void fetchProStatus(currentUserId);
+        else setIsProUser(readStoredProStatus());
       }
     };
     window.addEventListener('storage', handleStorage);
-    window.addEventListener('focus', syncProStatus);
-    window.addEventListener('pageshow', syncProStatus);
+    const handleFocus = () => {
+      if (userIdRef.current) void fetchProStatus(userIdRef.current);
+    };
+    const handlePageShow = () => {
+      if (userIdRef.current) void fetchProStatus(userIdRef.current);
+    };
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
 
     return () => {
       disposed = true;
       authListener.subscription.unsubscribe();
-      if (channel) void client.removeChannel(channel);
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', syncProStatus);
-      window.removeEventListener('pageshow', syncProStatus);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
     };
   }, []);
 
   const setProUser = useCallback((isPro: boolean) => {
     setIsProUser(isPro);
     persistProStatus(isPro);
+  }, []);
+
+  const refreshProStatus = useCallback(async () => {
+    const currentUserId = userIdRef.current;
+    if (!currentUserId) return false;
+    try {
+      const isPro = (await fetchProfileProStatus(currentUserId)) === true;
+      setIsProUser(isPro);
+      persistProStatus(isPro);
+      return isPro;
+    } catch (error) {
+      console.error('[auth] failed to refresh profile status:', error);
+      return false;
+    }
   }, []);
 
   /**
@@ -200,6 +179,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       isProLoading,
       isSupabaseReady: isSupabaseConfigured,
       setProUser,
+      refreshProStatus,
       usageCount,
       remainingUses: Math.max(0, MAX_FREE_USES - usageCount),
       incrementUsage,
@@ -212,6 +192,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       isProLoading,
       usageCount,
       setProUser,
+      refreshProStatus,
       incrementUsage,
       resetUsage,
     ]
