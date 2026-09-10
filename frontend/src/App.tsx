@@ -98,20 +98,13 @@ function Dashboard() {
     setIsUpgradeOpen(false);
   };
 
-  // Tool actions update busy and toast state locally after browser processing.
-
-  // ---- Tool invocation -------------------------------------------------------
-  // Runs a PDF tool with the queue + options collected in <PdfTools/>.
+  // Tool invocation
   const executeTool = async (opId: ToolId, files: QueuedFile[], options: Record<string, unknown>) => {
-    // Word-to-PDF and the PDF Editor run entirely in the renderer; they use
-    // their own panels and never need the Electron IPC pipeline.
     if (opId === 'word-to-pdf' || opId === 'edit-pdf') {
       toast.error('This tool runs in your browser — open its panel and use its built-in action.');
       return;
     }
 
-    // Trial gate: non-Pro users are locked out on their 4th attempt (i.e. after
-    // 3 successful uses have been completed on this device). Pro bypasses it.
     if (!isProUser && usageCount >= MAX_FREE_USES) {
       openUpgradeModal(FREE_TRIAL_LIMIT_MESSAGE);
       return;
@@ -170,12 +163,22 @@ function Dashboard() {
     }
   };
 
-
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
       <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
         <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold tracking-tight text-indigo-400">PDF & Doc Suite</h1>
+          {/* Logo + Title Section */}
+          <div className="flex items-center gap-3">
+            <img
+              src="/icon.png"
+              alt="PDF & Doc Suite Logo"
+              className="h-9 w-9 object-contain drop-shadow-md"
+            />
+            <h1 className="text-xl font-bold tracking-tight text-indigo-400">
+              PDF & Doc Suite
+            </h1>
+          </div>
+
           <nav className="flex gap-2">
             <button
               type="button"
@@ -261,7 +264,6 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-6xl p-8">
-        {/* PdfTools stays mounted (hidden) so file queues/options survive tab switches. */}
         <div className={activeTab === 'pdf-tools' ? '' : 'hidden'}>
           <PdfTools
             busy={busy}
@@ -271,9 +273,7 @@ function Dashboard() {
         </div>
 
         {activeTab === 'pdf-viewer' && <PdfViewer />}
-        {activeTab === 'viewer' && (
-          <WordViewer />
-        )}
+        {activeTab === 'viewer' && <WordViewer />}
         {activeTab === 'creator' && (
           <DocumentCreator onFreeTrialExhausted={() => openUpgradeModal(FREE_TRIAL_LIMIT_MESSAGE)} />
         )}
@@ -283,4 +283,3 @@ function Dashboard() {
     </div>
   );
 }
-

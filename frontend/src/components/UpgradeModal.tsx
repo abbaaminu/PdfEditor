@@ -16,6 +16,7 @@ type BillingCycle = 'monthly' | 'yearly';
 interface PaddleCheckoutOpenOptions {
   items: Array<{ priceId: string; quantity: number }>;
   customer?: { email?: string };
+  discountCode?: string;
   settings?: Record<string, unknown>;
   /** Attached to the transaction so the Paddle webhook can map it to a user. */
   customData?: Record<string, unknown>;
@@ -41,11 +42,6 @@ const COMPLETED_EVENT = 'checkout.completed';
 const CLOSED_EVENT = 'checkout.closed';
 const FAILED_EVENTS = new Set(['checkout.error', 'checkout.failed']);
 
-/**
- * Cache the in-flight Paddle SDK initialization so repeated open/close of the
- * modal never stacks duplicate `initializePaddle()` calls or orphaned
- * promises. Cleared when initialization rejects so it can be retried later.
- */
 let paddleInitialization: Promise<PaddleInstance | null> | null = null;
 
 function getPriceId(billingCycle: BillingCycle): string {
@@ -66,11 +62,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
   const [promoCode, setPromoCode] = useState('');
   const [promoError, setPromoError] = useState('');
 
-  /** Guards against late callbacks after the modal was closed/cancelled. */
   const sessionActiveRef = useRef(false);
   const demoTimerRef = useRef<number | null>(null);
 
-  // Invalidate any in-flight checkout/demo session whenever the modal closes.
   useEffect(() => {
     if (isOpen) return;
     sessionActiveRef.current = false;
@@ -80,7 +74,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     }
   }, [isOpen]);
 
-  // Extra safety: invalidate the session and clear timers on unmount.
   useEffect(() => {
     return () => {
       sessionActiveRef.current = false;
@@ -102,7 +95,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     onClose();
   }, [onClose]);
 
-  // Close the modal when Escape is pressed while it is open.
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -113,7 +105,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
   }, [handleClose, isOpen]);
 
   const handlePurchaseComplete = useCallback(() => {
-    if (!sessionActiveRef.current) return; // modal closed / session cancelled
+    if (!sessionActiveRef.current) return;
     sessionActiveRef.current = false;
     if (demoTimerRef.current !== null) {
       window.clearTimeout(demoTimerRef.current);
@@ -123,18 +115,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     toast.success('Welcome to Pro! All Pro features are now unlocked on this device.');
     handleClose();
   }, [handleClose, setProUser, toast]);
-
-  const applyPromoCode = useCallback(() => {
-    const configuredCode = (
-      import.meta.env.VITE_PRO_PROMO_CODE || import.meta.env.VITE_PADDLE_PROMO_CODE || ''
-    ).trim();
-    if (!configuredCode || promoCode.trim().toLowerCase() !== configuredCode.toLowerCase()) {
-      setPromoError('That promo code is not valid.');
-      return;
-    }
-    sessionActiveRef.current = true;
-    handlePurchaseComplete();
-  }, [handlePurchaseComplete, promoCode]);
 
   const handleCheckoutEvent = useCallback(
     (event: PaddleEvent) => {
@@ -160,11 +140,13 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     [handlePurchaseComplete]
   );
 
-  const startCheckout = useCallback(async () => {
+  const startCheckout = useCallback(async (overridePromo?: string) => {
     if (isCheckingOut) return;
     sessionActiveRef.current = true;
     setIsCheckingOut(true);
     setIsDemoCheckout(false);
+
+    const activeDiscount = (overridePromo ?? promoCode).trim() || undefined;
 
     try {
       const items = [{ priceId: getPriceId(billingCycle), quantity: 1 }];
@@ -172,6 +154,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
       const openCheckout = (): PaddleCheckoutOpenOptions => {
         const options: PaddleCheckoutOpenOptions = {
           items,
+          discountCode: activeDiscount,
           successCallback: handlePurchaseComplete,
           eventCallback: handleCheckoutEvent,
         };
@@ -182,7 +165,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return options;
       };
 
-      // 1. Prefer a global Paddle instance (e.g. classic embed script).
+      // 1. Prefer global Paddle instance
       const globalPaddle = (window as unknown as { Paddle?: PaddleInstance }).Paddle;
       if (globalPaddle?.Checkout?.open) {
         if (!sessionActiveRef.current) return;
@@ -190,7 +173,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return;
       }
 
-      // 2. Otherwise initialize the Paddle SDK (deduped) when a client token is set.
+      // 2. Fallback to initialize Paddle SDK
       const token = (
         import.meta.env.VITE_PADDLE_CLIENT_TOKEN ||
         import.meta.env.VITE_PADDLE_SELLER_ID ||
@@ -210,7 +193,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
               }) as unknown as PaddleInstance | null;
             })
             .catch((err) => {
-              paddleInitialization = null; // allow a later retry
+              paddleInitialization = null;
               throw err;
             });
         }
@@ -220,7 +203,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
         return;
       }
 
-      // 3. Development fallback so the upgrade flow can be tested end-to-end.
+      // 3. Development fallback
       if (import.meta.env.DEV) {
         if (!sessionActiveRef.current) return;
         setIsDemoCheckout(true);
@@ -245,11 +228,29 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     } finally {
       setIsCheckingOut(false);
     }
-  }, [billingCycle, handleCheckoutEvent, handlePurchaseComplete, isCheckingOut, toast, user]);
+  }, [billingCycle, handleCheckoutEvent, handlePurchaseComplete, isCheckingOut, promoCode, toast, user]);
+
+  const applyPromoCode = useCallback(() => {
+    const trimmedCode = promoCode.trim();
+    if (!trimmedCode) return;
+
+    const configuredCode = (
+      import.meta.env.VITE_PRO_PROMO_CODE || import.meta.env.VITE_PADDLE_PROMO_CODE || ''
+    ).trim();
+
+    // Direct local bypass if code matches VITE_PRO_PROMO_CODE
+    if (configuredCode && trimmedCode.toLowerCase() === configuredCode.toLowerCase()) {
+      sessionActiveRef.current = true;
+      handlePurchaseComplete();
+      return;
+    }
+
+    // Otherwise launch Paddle with the code pre-applied
+    startCheckout(trimmedCode);
+  }, [handlePurchaseComplete, promoCode, startCheckout]);
 
   if (!isOpen) return null;
 
-  // Already a Pro subscriber: show an active-status screen instead of pricing.
   if (isProUser) {
     return (
       <div
@@ -395,7 +396,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
 
         <button
           type="button"
-          onClick={startCheckout}
+          onClick={() => startCheckout()}
           disabled={isCheckingOut}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-semibold text-white shadow-lg transition hover:bg-indigo-500 active:scale-98 disabled:cursor-not-allowed disabled:opacity-70"
         >
