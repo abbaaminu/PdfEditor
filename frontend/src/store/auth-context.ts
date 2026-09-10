@@ -42,11 +42,12 @@ export interface AuthStoreValue {
   isProLoading: boolean;
   /** True when a Supabase client could be initialized from env vars. */
   isSupabaseReady: boolean;
-  /** True when the user holds an active/trialing subscription (or the local
-   *  fallback flag is set while no Supabase session exists). */
+  /** True when the user has a verified profile entitlement or local override. */
   isProUser: boolean;
   /** Optimistically flips Pro state and persists the local fallback flag. */
   setProUser: (isPro: boolean) => void;
+  /** Signs out of Supabase and resets the local entitlement state. */
+  signOut: () => Promise<void>;
   /** Re-checks the signed-in user's profiles.is_pro entitlement. */
   refreshProStatus: () => Promise<boolean>;
   /** Successful free-trial actions completed on this device (0..MAX_FREE_USES). */
@@ -76,6 +77,14 @@ export function readStoredProStatus(): boolean {
       localStorage.getItem(LOCAL_PRO_UNLOCKED_KEY) === 'true' ||
       localStorage.getItem(LOCAL_PRO_ACCESS_KEY) === 'true'
     );
+  } catch {
+    return false;
+  }
+}
+
+export function hasLocalProOverride(): boolean {
+  try {
+    return localStorage.getItem(LOCAL_PRO_ACCESS_KEY) === 'true';
   } catch {
     return false;
   }

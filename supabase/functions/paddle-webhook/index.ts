@@ -138,6 +138,24 @@ serve(async (req: Request) => {
       });
     }
 
+    const isPro = data.status === 'active' || data.status === 'trialing';
+    const { error: profileError } = await supabaseAdmin.from('profiles').upsert(
+      {
+        id: userId,
+        is_pro: isPro,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (profileError) {
+      console.error('Failed to upsert profile entitlement:', profileError);
+      return new Response(JSON.stringify({ error: profileError.message }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
     return new Response(
       JSON.stringify({ ok: true, event_type: eventType, handled: true }),
       { status: 200, headers: jsonHeaders }

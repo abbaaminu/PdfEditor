@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Check, CircleAlert, Crown, LoaderCircle, Sparkles, X } from 'lucide-react';
 import { grantLocalProAccess, verifyPromoCode } from '../lib/promo';
-import { fetchProfileProStatus, supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/auth-context';
 import { useToast } from './toast-context';
 
@@ -92,8 +92,69 @@ function describeError(err: unknown): string {
   return 'Unable to authenticate.';
 }
 
+/**
+ * Mirrors a completed checkout onto the signed-in account's `profiles` row so
+ * the entitlement follows the user rather than a single device.
+ *
+ * Returns `null` on success — and also when there is no account to attach the
+ * purchase to (guest checkout, demo checkout, signed-out user) — or the error
+ * message when the write failed. Never throws.
+ */
+async function persistProStatusToProfile(): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const {
+      data: { user: account },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      // A guest/demo checkout has no session — that is not a failure.
+      if (/session missing|not authenticated|invalid claim/i.test(userError.message)) return null;
+      throw userError;
+    }
+    if (!account) return null;
+
+    const { error: upsertError } = await supabase
+      .from('profiles')
+      .upsert({ id: account.id, email: account.email, is_pro: true });
+    if (upsertError) throw upsertError;
+    return null;
+  } catch (err) {
+    return describeError(err);
+  }
+}
+
+/**
+ * Stores Pro on the account after a successful checkout.
+ *
+ * Retries a few times because Paddle's webhook normally records the
+ * subscription a moment *after* the browser-side checkout completes, and the
+ * `profiles` policy only accepts the write once an active subscription exists.
+ * Every failed attempt is logged (never silently swallowed) and a final
+ * failure is reported through `onFailure`.
+ */
+async function syncProStatusToProfile(onFailure: (message: string) => void): Promise<void> {
+  const maxAttempts = 3;
+  let lastError = 'unknown error';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    lastError = (await persistProStatusToProfile()) ?? '';
+    if (!lastError) return;
+    console.error(
+      `Supabase Profile Error: Pro status sync failed (attempt ${attempt}/${maxAttempts}):`,
+      lastError
+    );
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  onFailure(lastError);
+}
+
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, message }) => {
-  const { isProUser, setProUser, user } = useAuthStore();
+  const { isProUser, setProUser, signOut, user } = useAuthStore();
   const toast = useToast();
 
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
@@ -159,6 +220,14 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
     }
     setProUser(true);
     toast.success('Welcome to Pro! All Pro features are now unlocked on this device.');
+    // Persist the purchase against the account (signed-in web checkouts). Runs
+    // in the background so the local unlock is never blocked by the network,
+    // and reports/re-records failures instead of failing quietly.
+    void syncProStatusToProfile((message) => {
+      toast.error(
+        `Pro is unlocked on this device, but saving it to your account failed: ${message}`
+      );
+    });
     handleClose();
   }, [handleClose, setProUser, toast]);
 
@@ -192,7 +261,13 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
       let isPro = false;
       let profileError: string | null = null;
       try {
-        isPro = (await fetchProfileProStatus(userId)) === true;
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('is_pro')
+          .eq('id', userId)
+          .maybeSingle();
+        if (error) throw error;
+        isPro = data?.is_pro === true;
       } catch (err) {
         // Never fail quietly: log the exact PostgREST/Supabase error (message
         // first, then the raw object for stack/details) and keep it in a
@@ -206,7 +281,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
       if (isPro) {
         grantLocalProAccess();
         setProUser(true);
-        toast.success('Pro access restored.');
+        toast.success('Pro Activated!');
         handleClose();
       } else if (profileError) {
         setAuthError(
@@ -420,6 +495,18 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
           >
             Continue
           </button>
+          {user && (
+            <button
+              type="button"
+              onClick={() => {
+                void signOut();
+                handleClose();
+              }}
+              className="mt-3 w-full rounded-xl border border-slate-700 py-3 font-semibold text-slate-300 transition hover:border-red-400/60 hover:text-red-300"
+            >
+              Log out
+            </button>
+          )}
         </div>
       </div>
     );
@@ -531,6 +618,19 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
             {authError && <p className="text-xs text-red-300" role="alert">{authError}</p>}
           </div>
         </div>
+
+        {user && (
+          <button
+            type="button"
+            onClick={() => {
+              void signOut();
+              handleClose();
+            }}
+            className="mt-4 w-full rounded-lg border border-slate-700 py-2 text-sm font-semibold text-slate-300 transition hover:border-red-400/60 hover:text-red-300"
+          >
+            Log out
+          </button>
+        )}
 
         {/* Plan Switcher */}
         <div className="mt-6 flex justify-center">

@@ -4,13 +4,13 @@ import type { Session, User } from '@supabase/supabase-js';
 import { fetchProfileProStatus, isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
   AuthContext,
+  hasLocalProOverride,
   LOCAL_PRO_UNLOCKED_KEY,
   LOCAL_PRO_ACCESS_KEY,
   MAX_FREE_USES,
   PRO_STORAGE_KEY,
   persistProStatus,
   persistUsageCount,
-  readStoredProStatus,
   readStoredUsageCount,
 } from './auth-context';
 import type { AuthStoreValue } from './auth-context';
@@ -18,7 +18,7 @@ import type { AuthStoreValue } from './auth-context';
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [isProUser, setIsProUser] = useState<boolean>(readStoredProStatus);
+  const [isProUser, setIsProUser] = useState<boolean>(hasLocalProOverride);
   const [isProLoading, setIsProLoading] = useState(false);
   const [usageCount, setUsageCount] = useState<number>(() => readStoredUsageCount());
 
@@ -41,8 +41,8 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       try {
         const isPro = await fetchProfileProStatus(userId);
         if (disposed) return;
-        if (isPro === true) persistProStatus(true);
-        setIsProUser(isPro === true || readStoredProStatus());
+        persistProStatus(isPro === true);
+        setIsProUser(isPro === true);
       } catch (error) {
         if (disposed) return;
         console.error('[auth] failed to load profile status:', error);
@@ -61,9 +61,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (nextSession?.user) {
         await fetchProStatus(nextSession.user.id);
       } else {
-        // Signed out: fall back to the locally stored flag (demo/dev mode).
+        // A signed-out user may retain only an explicit local promo override.
         setIsProLoading(false);
-        setIsProUser(readStoredProStatus());
+        if (hasLocalProOverride()) {
+          setIsProUser(true);
+        } else {
+          persistProStatus(false);
+          setIsProUser(false);
+        }
       }
     };
 
@@ -98,7 +103,11 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       ) {
         const currentUserId = userIdRef.current;
         if (currentUserId) void fetchProStatus(currentUserId);
-        else setIsProUser(readStoredProStatus());
+        else if (hasLocalProOverride()) setIsProUser(true);
+        else {
+          persistProStatus(false);
+          setIsProUser(false);
+        }
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -123,6 +132,19 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const setProUser = useCallback((isPro: boolean) => {
     setIsProUser(isPro);
     persistProStatus(isPro);
+  }, []);
+
+  const signOut = useCallback(async () => {
+    if (supabase) {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error('[auth] failed to sign out:', error);
+    }
+    persistProStatus(false);
+    setSession(null);
+    setUser(null);
+    userIdRef.current = null;
+    setIsProUser(false);
+    setIsProLoading(false);
   }, []);
 
   const refreshProStatus = useCallback(async () => {
@@ -179,6 +201,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       isProLoading,
       isSupabaseReady: isSupabaseConfigured,
       setProUser,
+      signOut,
       refreshProStatus,
       usageCount,
       remainingUses: Math.max(0, MAX_FREE_USES - usageCount),
@@ -192,6 +215,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       isProLoading,
       usageCount,
       setProUser,
+      signOut,
       refreshProStatus,
       incrementUsage,
       resetUsage,
