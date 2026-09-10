@@ -672,7 +672,20 @@ export const DocumentCreator: React.FC<DocumentCreatorProps> = ({ onFreeTrialExh
   const handleExportDocx = async () => {
     const titleText = title.trim();
     const blocks: DocChild[] = [];
-    collectBlocksInto(editorRef.current, blocks);
+    const editor = editorRef.current;
+    const bodyHtml = editor?.innerHTML.trim() ?? '';
+    const bodyText = editor?.innerText.trim() ?? '';
+    if (bodyHtml) {
+      const bodySnapshot = document.createElement('div');
+      bodySnapshot.innerHTML = bodyHtml;
+      collectBlocksInto(bodySnapshot, blocks);
+    }
+    if (blocks.length === 0 && bodyText) {
+      bodyText.split(/\r?\n/).forEach((line) => {
+        const text = line.trim();
+        if (text) blocks.push(new Paragraph({ children: [new TextRun({ text })] }));
+      });
+    }
     if (!titleText && blocks.length === 0) return;
     if (!canStartAction()) return;
 
