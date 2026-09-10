@@ -1,6 +1,17 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocument } from 'pdf-lib';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
 
 export interface RenderPageOptions {
   scale?: number;
@@ -78,4 +89,49 @@ export async function convertPdfToImages(
   }
 
   return imageUrls;
+}
+
+/** Rasterizes each source page and rebuilds a smaller PDF from JPEG images. */
+export async function compressPdfToPdf(
+  file: File,
+  scale = 0.85,
+  quality = 0.55,
+  onProgress?: (current: number, total: number) => void
+): Promise<Uint8Array> {
+  const loadingTask = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
+  const pdfDocument = await loadingTask.promise;
+  const output = await PDFDocument.create();
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context not available');
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+      const page = await pdfDocument.getPage(pageNumber);
+      const viewport = page.getViewport({ scale });
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      const jpegBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', quality));
+      const image = await output.embedJpg(jpegBytes);
+      const pageWidth = 595.28;
+      const pageHeight = 841.89;
+      const fit = Math.min(pageWidth / image.width, pageHeight / image.height);
+      const width = image.width * fit;
+      const height = image.height * fit;
+      const outputPage = output.addPage([pageWidth, pageHeight]);
+      outputPage.drawImage(image, {
+        x: (pageWidth - width) / 2,
+        y: (pageHeight - height) / 2,
+        width,
+        height,
+      });
+      onProgress?.(pageNumber, pdfDocument.numPages);
+    }
+    return output.save({ useObjectStreams: true });
+  } finally {
+    await pdfDocument.destroy();
+  }
 }

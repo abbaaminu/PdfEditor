@@ -18,6 +18,7 @@ import { WordViewer } from './components/WordViewer';
 import { AuthProvider } from './store/AuthProvider';
 import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from './store/auth-context';
 import { PDFDocument } from 'pdf-lib';
+import { compressPdfToPdf } from './lib/pdfRenderer';
 
 type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
 
@@ -132,9 +133,8 @@ function Dashboard() {
       } else if (opId === 'images-to-pdf') {
         downloadPdf(await imagesToPdf(sourceFiles), 'images.pdf');
       } else if (opId === 'compress-pdf') {
-        const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
         downloadPdf(
-          await source.save({ useObjectStreams: true }),
+          await compressPdfToPdf(sourceFiles[0]),
           `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`
         );
       } else if (opId === 'split-pdf') {

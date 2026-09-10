@@ -1,52 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { CircleAlert, FileText, LoaderCircle, Upload } from 'lucide-react';
-import mammoth from 'mammoth';
-import DOMPurify from 'dompurify';
-
-/**
- * Sanitize mammoth-generated HTML before it is injected with
- * dangerouslySetInnerHTML. DOMPurify strips active content (scripts, event
- * handlers, embedded objects…); the post-pass below additionally restricts
- * every URL attribute to a strict allow-list of schemes — http/https/mailto
- * or inline base64 PNG/JPEG images — so nothing unsanitized is ever returned.
- */
-const SAFE_LINK_SCHEMES = ['http:', 'https:', 'mailto:'];
-const SAFE_IMAGE_DATA_PREFIXES = [
-  'data:image/png;base64,',
-  'data:image/jpeg;base64,',
-  'data:image/jpg;base64,',
-];
-const URL_ATTRIBUTES = new Set(['href', 'src', 'xlink:href']);
-
-function isAllowedUrl(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized.startsWith('#')) return true; // in-page anchors
-  if (SAFE_LINK_SCHEMES.some((scheme) => normalized.startsWith(scheme))) return true;
-  return SAFE_IMAGE_DATA_PREFIXES.some((prefix) => normalized.startsWith(prefix));
-}
-
-function sanitizeWordHtml(html: string): string {
-  const clean = DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-  });
-
-  const parsed = new DOMParser().parseFromString(clean, 'text/html');
-  parsed.querySelectorAll('*').forEach((element) => {
-    Array.from(element.attributes).forEach((attribute) => {
-      const name = attribute.name.toLowerCase();
-      if (URL_ATTRIBUTES.has(name) && !isAllowedUrl(attribute.value)) {
-        element.removeAttribute(attribute.name);
-      }
-    });
-  });
-
-  return parsed.body ? parsed.body.innerHTML : '';
-}
+import { renderAsync } from 'docx-preview';
 
 export const WordViewer: React.FC = () => {
   const [fileName, setFileName] = useState('');
-  const [content, setContent] = useState('');
+  const [hasContent, setHasContent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [pageCount, setPageCount] = useState(0);
@@ -54,14 +12,13 @@ export const WordViewer: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const renderRef = useRef<HTMLDivElement>(null);
 
-  const updatePageTracking = (hasContent = Boolean(content)) => {
+  const updatePageTracking = (documentLoaded = hasContent) => {
     const container = previewRef.current;
     if (!container) return;
-    const sections = Array.from(
-      container.querySelectorAll<HTMLElement>('.docx-wrapper > section')
-    );
-    const total = sections.length || (hasContent ? 1 : 0);
+    const sections = Array.from(container.querySelectorAll<HTMLElement>('.docx-wrapper > section'));
+    const total = sections.length || (documentLoaded ? 1 : 0);
     setPageCount(total);
     if (total === 0) {
       setActivePage(1);
@@ -77,9 +34,14 @@ export const WordViewer: React.FC = () => {
   };
 
   const renderDocument = async (arrayBuffer: ArrayBuffer) => {
-    const isolatedBytes = new Uint8Array(arrayBuffer).slice();
-    const result = await mammoth.convertToHtml({ arrayBuffer: isolatedBytes.buffer });
-    setContent(sanitizeWordHtml(result.value));
+    const container = renderRef.current;
+    if (!container) return;
+    container.replaceChildren();
+    await renderAsync(arrayBuffer, container, undefined, {
+      breakPages: true,
+      experimental: true,
+    });
+    setHasContent(true);
     requestAnimationFrame(() => {
       previewRef.current?.scrollTo({ top: 0 });
       updatePageTracking(true);
@@ -98,6 +60,9 @@ export const WordViewer: React.FC = () => {
 
     setError('');
     setFileName(file.name);
+    setHasContent(false);
+    setPageCount(0);
+    setActivePage(1);
     try {
       setIsLoading(true);
       const bytes = new Uint8Array(await file.arrayBuffer()).slice();
@@ -165,11 +130,10 @@ export const WordViewer: React.FC = () => {
             <LoaderCircle className="h-8 w-8 animate-spin text-indigo-400" />
             <p className="text-sm">Parsing document contents…</p>
           </div>
-        ) : content ? (
-          <div className="docx-wrapper wv-content" dangerouslySetInnerHTML={{ __html: content }} />
-        ) : (
+        ) : !hasContent ? (
           <p className="text-slate-500 italic">Select a .docx file to view its contents.</p>
-        )}
+        ) : null}
+        <div ref={renderRef} className={isLoading || !hasContent ? 'hidden' : 'wv-content'} />
       </div>
     </div>
   );
