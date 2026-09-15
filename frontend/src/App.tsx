@@ -89,7 +89,7 @@ export default function App() {
 
 function Dashboard() {
   const toast = useToast();
-  const { isProUser, usageCount, remainingUses, incrementUsage, resetUsage, signOut, user } =
+  const { isProUser, usageCount, remainingUses, incrementUsage, resetUsage, signOut } =
     useAuthStore();
   const [activeTab, setActiveTab] = useState<TabId>('pdf-tools');
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
@@ -276,7 +276,7 @@ function Dashboard() {
             )}
             {isProUser ? 'Pro Active' : 'Upgrade Pro'}
           </button>
-          {isProUser && user && (
+          {isProUser && (
             <button
               type="button"
               onClick={() => void signOut()}

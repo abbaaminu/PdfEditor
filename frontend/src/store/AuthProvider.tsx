@@ -42,12 +42,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       } catch (error) {
         console.error('[auth] failed to clear invalid session:', error);
       } finally {
-        if (disposed) return;
-        setSession(null);
-        setUser(null);
-        userIdRef.current = null;
-        setIsProUser(false);
-        setIsProLoading(false);
+        if (!disposed) {
+          setSession(null);
+          setUser(null);
+          userIdRef.current = null;
+          setIsProUser(false);
+          setIsProLoading(false);
+        }
       }
     };
 

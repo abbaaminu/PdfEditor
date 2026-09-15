@@ -580,10 +580,11 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
   }, []);
 
   useEffect(() => {
+    const renderTasks = tasksRef.current;
     return () => {
       renderVersionRef.current += 1;
-      tasksRef.current.forEach((t) => t.cancel());
-      tasksRef.current.clear();
+      renderTasks.forEach((t) => t.cancel());
+      renderTasks.clear();
 
       const task = loadingTaskRef.current;
       loadingTaskRef.current = null;
