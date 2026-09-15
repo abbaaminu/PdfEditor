@@ -504,7 +504,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
               }}
               className="mt-3 w-full rounded-xl border border-slate-700 py-3 font-semibold text-slate-300 transition hover:border-red-400/60 hover:text-red-300"
             >
-              Log out
+              Log Out
             </button>
           )}
         </div>
@@ -628,7 +628,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, mes
             }}
             className="mt-4 w-full rounded-lg border border-slate-700 py-2 text-sm font-semibold text-slate-300 transition hover:border-red-400/60 hover:text-red-300"
           >
-            Log out
+            Log Out
           </button>
         )}
 

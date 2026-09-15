@@ -55,16 +55,11 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            // Group heavy document handling modules into a single vendor bundle
-            if (
-              id.includes('pdfjs-dist') ||
-              id.includes('pdf-lib') ||
-              id.includes('docx') ||
-              id.includes('mammoth') ||
-              id.includes('xlsx')
-            ) {
-              return 'vendor-docs';
-            }
+            if (id.includes('pdfjs-dist')) return 'vendor-pdfjs';
+            if (id.includes('pdf-lib')) return 'vendor-pdflib';
+            if (id.includes('docx')) return 'vendor-docx';
+            if (id.includes('mammoth')) return 'vendor-mammoth';
+            if (id.includes('xlsx')) return 'vendor-xlsx';
             // Keep UI framework libraries together
             if (id.includes('react') || id.includes('lucide-react')) {
               return 'vendor-ui';

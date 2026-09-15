@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import { loadPdfDocument } from './pdfjs';
+import { loadPdfDocument, pdfjsLib } from './pdfjs';
 
 /**
  * pdf-lib's standard fonts use WinAnsi encoding, which cannot represent
@@ -168,13 +168,16 @@ export async function compressPdfToPdf(
   const quality = clamp(options.quality ?? 0.55, 0.05, 0.95);
 
   const loadingTask = loadPdfDocument(await file.arrayBuffer());
-  const pdfDocument = await loadingTask.promise;
-  const output = await PDFDocument.create();
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d', { alpha: false });
-  if (!context) throw new Error('Canvas 2D context not available');
+  let pdfDocument: pdfjsLib.PDFDocumentProxy | null = null;
+  let canvas: HTMLCanvasElement | null = null;
 
   try {
+    pdfDocument = await loadingTask.promise;
+    const output = await PDFDocument.create();
+    canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('Canvas 2D context not available');
+
     const total = pdfDocument.numPages;
     for (let pageNumber = 1; pageNumber <= total; pageNumber += 1) {
       const page = await pdfDocument.getPage(pageNumber);
@@ -204,8 +207,11 @@ export async function compressPdfToPdf(
     }
     return await output.save({ useObjectStreams: true });
   } finally {
-    await pdfDocument.destroy();
-    canvas.width = 0;
-    canvas.height = 0;
+    if (pdfDocument) await pdfDocument.destroy().catch(() => undefined);
+    await loadingTask.destroy().catch(() => undefined);
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 }

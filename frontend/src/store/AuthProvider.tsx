@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { fetchProfileProStatus, isSupabaseConfigured, supabase } from '../lib/supabase';
+import { fetchProfileProStatus, isSupabaseConfigured, signOutUser, supabase } from '../lib/supabase';
 import {
   AuthContext,
   hasLocalProOverride,
@@ -35,6 +35,32 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     if (!client) return;
 
     let disposed = false;
+    const resetAuthState = async (reason: string) => {
+      console.error(`[auth] resetting invalid session: ${reason}`);
+      try {
+        await signOutUser();
+      } catch (error) {
+        console.error('[auth] failed to clear invalid session:', error);
+      } finally {
+        if (disposed) return;
+        setSession(null);
+        setUser(null);
+        userIdRef.current = null;
+        setIsProUser(false);
+        setIsProLoading(false);
+      }
+    };
+
+    const isJwtFailure = (error: unknown): boolean => {
+      if (!error || typeof error !== 'object') return false;
+      const value = error as { status?: number; code?: string; message?: string };
+      return (
+        value.status === 401 ||
+        value.code === 'PGRST301' ||
+        /jwt|token|refresh token|unauthorized|not authenticated/i.test(value.message ?? '')
+      );
+    };
+
     /** Query the DB for the user's profile to decide Pro status. */
     const fetchProStatus = async (userId: string) => {
       setIsProLoading(true);
@@ -46,7 +72,10 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       } catch (error) {
         if (disposed) return;
         console.error('[auth] failed to load profile status:', error);
+        persistProStatus(false);
+        setIsProUser(false);
         setIsProLoading(false);
+        if (isJwtFailure(error)) void resetAuthState('profile request returned an expired or invalid JWT');
         return;
       }
       setIsProLoading(false);
@@ -75,11 +104,16 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     // Initial session.
     client.auth
       .getSession()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          void resetAuthState(error.message);
+          return;
+        }
         if (!disposed) void applySession(data.session);
       })
       .catch((err) => {
         console.error('[auth] failed to read session:', err);
+        void resetAuthState(err instanceof Error ? err.message : 'session restore failed');
       });
 
     // Listen for sign in / out / token refresh.
@@ -135,16 +169,17 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   }, []);
 
   const signOut = useCallback(async () => {
-    if (supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) console.error('[auth] failed to sign out:', error);
+    try {
+      await signOutUser();
+    } catch (error) {
+      console.error('[auth] sign-out request failed:', error);
+    } finally {
+      setSession(null);
+      setUser(null);
+      userIdRef.current = null;
+      setIsProUser(false);
+      setIsProLoading(false);
     }
-    persistProStatus(false);
-    setSession(null);
-    setUser(null);
-    userIdRef.current = null;
-    setIsProUser(false);
-    setIsProLoading(false);
   }, []);
 
   const refreshProStatus = useCallback(async () => {

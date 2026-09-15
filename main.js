@@ -10,6 +10,25 @@ const { imagesToPDF } = require('./backend/imageToPdf');
 
 let mainWin;
 
+function isTrustedSender(event) {
+  if (event.sender !== mainWin?.webContents) return false;
+
+  const frameUrl = event.senderFrame?.url ?? event.sender.getURL();
+  if (frameUrl.startsWith('file://')) return true;
+
+  try {
+    return new URL(frameUrl).origin === 'http://localhost:5173';
+  } catch {
+    return false;
+  }
+}
+
+function replyIfAlive(event, channel, ...args) {
+  if (!event.sender.isDestroyed()) {
+    event.sender.send(channel, ...args);
+  }
+}
+
 function getWindowIcon() {
   const candidates = app.isPackaged
     ? [
@@ -44,6 +63,14 @@ function createWindow() {
 
   if (!appIcon.isEmpty()) mainWin.setIcon(appIcon);
 
+  mainWin.webContents.on('will-navigate', (event, url) => {
+    const isLocal = url.startsWith('file://') || new URL(url).origin === 'http://localhost:5173';
+    if (!isLocal) {
+      event.preventDefault();
+      if (/^https?:/i.test(url)) void shell.openExternal(url);
+    }
+  });
+
   // External destinations opened with window.open (e.g. the hosted checkout the
   // upgrade modal uses on desktop) belong in the user's default browser, not in
   // a bare Electron window. Anything non-http(s) keeps the default behaviour.
@@ -67,6 +94,10 @@ function createWindow() {
   } else {
     mainWin.loadFile(rendererEntry);
   }
+
+  mainWin.on('closed', () => {
+    mainWin = null;
+  });
 }
 
 app.whenReady().then(() => {
@@ -179,6 +210,7 @@ function validateInputFileList(filePaths, expectedExtensions) {
 }
 
 ipcMain.on('split-pdf', async (event, payload) => {
+  if (!isTrustedSender(event)) return;
   const parsed = parseToolPayload(payload);
   let filePaths = parsed.filePaths;
   const options = parsed.options || {};
@@ -195,7 +227,7 @@ ipcMain.on('split-pdf', async (event, payload) => {
 
   try {
     filePaths = validateInputFileList(filePaths, ['.pdf']);
-    event.reply('split-pdf-processing', 'Splitting PDF pages…');
+    replyIfAlive(event, 'split-pdf-processing', 'Splitting PDF pages…');
     const outputFiles = await splitPDF(filePaths[0], {
       ranges: options.ranges,
       rangesText: options.rangesText,
@@ -203,20 +235,22 @@ ipcMain.on('split-pdf', async (event, payload) => {
       everyN: options.everyN,
     });
     if (!outputFiles) {
-      event.reply('split-pdf-cancelled', 'Split cancelled.');
+      replyIfAlive(event, 'split-pdf-cancelled', 'Split cancelled.');
       return; // user cancelled the output folder picker
     }
     const count = Array.isArray(outputFiles) ? outputFiles.length : 1;
-    event.reply(
+    replyIfAlive(
+      event,
       'split-pdf-success',
       `PDF split successfully into ${count} file${count === 1 ? '' : 's'}.`
     );
   } catch (err) {
-    event.reply('split-pdf-error', err.message || 'Failed to split PDF.');
+    replyIfAlive(event, 'split-pdf-error', err.message || 'Failed to split PDF.');
   }
 });
 
 ipcMain.on('compress-pdf', async (event, payload) => {
+  if (!isTrustedSender(event)) return;
   const parsed = parseToolPayload(payload);
   let filePaths = parsed.filePaths;
   const options = parsed.options || {};
@@ -233,7 +267,7 @@ ipcMain.on('compress-pdf', async (event, payload) => {
 
   try {
     filePaths = validateInputFileList(filePaths, ['.pdf']);
-    event.reply('compress-pdf-processing', 'Compressing PDF… this may take a moment.');
+    replyIfAlive(event, 'compress-pdf-processing', 'Compressing PDF… this may take a moment.');
     const result = await compressPDF(filePaths[0], {
       preset: options.preset,
       dpi: options.dpi,
@@ -241,20 +275,22 @@ ipcMain.on('compress-pdf', async (event, payload) => {
       engine: options.engine,
     });
     if (!result) {
-      event.reply('compress-pdf-cancelled', 'Compression cancelled.');
+      replyIfAlive(event, 'compress-pdf-cancelled', 'Compression cancelled.');
       return; // user cancelled the output save dialog
     }
-    event.reply(
+    replyIfAlive(
+      event,
       'compress-pdf-success',
       `PDF compressed successfully (${result.engine}). ` +
         `Size reduced by ${result.savingsPercent}%. Saved to ${result.outputPath}`
     );
   } catch (err) {
-    event.reply('compress-pdf-error', err.message || 'Failed to compress PDF.');
+    replyIfAlive(event, 'compress-pdf-error', err.message || 'Failed to compress PDF.');
   }
 });
 
 ipcMain.on('merge-pdf', async (event, payload) => {
+  if (!isTrustedSender(event)) return;
   const parsed = parseToolPayload(payload);
   let filePaths = parsed.filePaths;
 
@@ -266,7 +302,7 @@ ipcMain.on('merge-pdf', async (event, payload) => {
     });
 
     if (canceled || picked.length < 2) {
-      if (!canceled) event.reply('merge-pdf-error', 'Please select at least two PDF files to merge.');
+      if (!canceled) replyIfAlive(event, 'merge-pdf-error', 'Please select at least two PDF files to merge.');
       return;
     }
     filePaths = picked;
@@ -274,19 +310,20 @@ ipcMain.on('merge-pdf', async (event, payload) => {
 
   try {
     filePaths = validateInputFileList(filePaths, ['.pdf']);
-    event.reply('merge-pdf-processing', `Merging ${filePaths.length} PDF files…`);
+    replyIfAlive(event, 'merge-pdf-processing', `Merging ${filePaths.length} PDF files…`);
     const outputPath = await mergeFiles(filePaths);
     if (!outputPath) {
-      event.reply('merge-pdf-cancelled', 'Merge cancelled.');
+      replyIfAlive(event, 'merge-pdf-cancelled', 'Merge cancelled.');
       return; // user cancelled the output save dialog
     }
-    event.reply('merge-pdf-success', `PDFs merged successfully. Saved to ${outputPath}`);
+    replyIfAlive(event, 'merge-pdf-success', `PDFs merged successfully. Saved to ${outputPath}`);
   } catch (err) {
-    event.reply('merge-pdf-error', err.message || 'Failed to merge PDFs.');
+    replyIfAlive(event, 'merge-pdf-error', err.message || 'Failed to merge PDFs.');
   }
 });
 
 ipcMain.on('convert-pdf-images', async (event, payload) => {
+  if (!isTrustedSender(event)) return;
   const parsed = parseToolPayload(payload);
   let filePaths = parsed.filePaths;
   const options = parsed.options || {};
@@ -313,7 +350,8 @@ ipcMain.on('convert-pdf-images', async (event, payload) => {
     filePaths = validateInputFileList(filePaths, ['.pdf']);
     const format = String(options.format || 'png').toLowerCase();
     const fileName = filePaths.length === 1 ? filePaths[0] : `${filePaths.length} PDFs`;
-    event.reply(
+    replyIfAlive(
+      event,
       'convert-pdf-images-processing',
       `Extracting pages from ${fileName} to ${format.toUpperCase()} images…`
     );
@@ -322,16 +360,18 @@ ipcMain.on('convert-pdf-images', async (event, payload) => {
       dpi: options.dpi,
       quality: options.quality,
     });
-    event.reply(
+    replyIfAlive(
+      event,
       'convert-pdf-images-success',
       `${filePaths.length} PDF${filePaths.length === 1 ? '' : 's'} converted to ${format.toUpperCase()} images in ${result}`
     );
   } catch (err) {
-    event.reply('convert-pdf-images-error', err.message || 'Failed to convert PDF.');
+    replyIfAlive(event, 'convert-pdf-images-error', err.message || 'Failed to convert PDF.');
   }
 });
 
 ipcMain.on('images-to-pdf', async (event, payload) => {
+  if (!isTrustedSender(event)) return;
   const parsed = parseToolPayload(payload);
   let filePaths = parsed.filePaths;
   const options = parsed.options || {};
@@ -357,22 +397,26 @@ ipcMain.on('images-to-pdf', async (event, payload) => {
 
   try {
     filePaths = validateInputFileList(filePaths, ['.png', '.jpg', '.jpeg']);
-    event.reply('images-to-pdf-processing', `Assembling ${filePaths.length} image${filePaths.length === 1 ? '' : 's'} into a PDF…`);
+    replyIfAlive(event, 'images-to-pdf-processing', `Assembling ${filePaths.length} image${filePaths.length === 1 ? '' : 's'} into a PDF…`);
     const saved = await imagesToPDF(filePaths, outputPath, {
       pageSize: options.pageSize,
       orientation: options.orientation,
       margin: options.margin,
     });
-    event.reply('images-to-pdf-success', `Images assembled into PDF successfully. Saved to ${saved}`);
+    replyIfAlive(event, 'images-to-pdf-success', `Images assembled into PDF successfully. Saved to ${saved}`);
   } catch (err) {
-    event.reply('images-to-pdf-error', err.message || 'Failed to create PDF from images.');
+    replyIfAlive(event, 'images-to-pdf-error', err.message || 'Failed to create PDF from images.');
   }
 });
 
 // Native dialog + file read for the Word (.docx) viewer. The renderer asks via
 // ipcRenderer.invoke, receives { fileName, base64 } (or { canceled: true }),
 // and hands the bytes to mammoth in the browser context.
-ipcMain.handle('open-docx-dialog', async () => {
+ipcMain.handle('open-docx-dialog', async (event) => {
+  if (!isTrustedSender(event)) {
+    throw new Error('Untrusted IPC sender.');
+  }
+
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWin, {
     title: 'Select Word Document',
     filters: [{ name: 'Word Documents', extensions: ['docx'] }],

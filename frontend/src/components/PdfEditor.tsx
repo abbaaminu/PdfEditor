@@ -485,8 +485,15 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
     }
   };
 
+  const handleRenderError = (error: unknown) => {
+    if (error instanceof Error && /cancel/i.test(error.message)) return;
+    setError(error instanceof Error ? error.message : 'PDF rendering failed.');
+  };
+
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => void renderAllPages());
+    const frame = window.requestAnimationFrame(() => {
+      void renderAllPages().catch(handleRenderError);
+    });
     return () => window.cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages, fileName, zoom, isOpen, selection]);
@@ -511,7 +518,9 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      void (async () => { for (let i = 0; i < pages.length; i += 1) await renderThumb(pages[i], i); })();
+      void (async () => {
+        for (let i = 0; i < pages.length; i += 1) await renderThumb(pages[i], i);
+      })().catch(handleRenderError);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [pages, fileName, isOpen, showThumbs]);
@@ -571,11 +580,17 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
   }, []);
 
   useEffect(() => {
-    const task = loadingTaskRef.current;
-    const renderTasks = tasksRef.current;
     return () => {
-      renderTasks.forEach((t) => t.cancel());
+      renderVersionRef.current += 1;
+      tasksRef.current.forEach((t) => t.cancel());
+      tasksRef.current.clear();
+
+      const task = loadingTaskRef.current;
+      loadingTaskRef.current = null;
       if (task) void task.destroy().catch(() => undefined);
+
+      proxiesRef.current.forEach((page) => page?.cleanup());
+      proxiesRef.current = [];
     };
   }, []);
 
@@ -767,7 +782,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
         index,
         overlay: { id: nextId(), kind: tool, x: point.x, y: point.y, w: 1, h: 1, points: [point], color: tool === 'highlight' ? highlightColor : penColor, strokeWidth: brushSize },
       };
-      void renderOnePage(index);
+      void renderOnePage(index).catch(handleRenderError);
       (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
       return;
     }
@@ -779,7 +794,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
           : { id: nextId(), kind: tool as Overlay['kind'], x: point.x, y: point.y, w: 0, h: 0, color: shapeStroke, fill: shapeFill === 'transparent' ? undefined : shapeFill, strokeWidth: shapeWidth, opacity: 0.25 },
     };
     dragRef.current = { index, mode: 'draw', overlayIndex: -1, start: point };
-    void renderOnePage(index);
+    void renderOnePage(index).catch(handleRenderError);
     (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
   };
 
@@ -795,7 +810,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
     if (draft && (!drag || drag.mode === 'draw')) {
       if (draft.overlay.kind === 'pen' || draft.overlay.kind === 'highlight') {
         draft.overlay.points = [...(draft.overlay.points ?? []), getPoint(event, draft.index)];
-        void renderOnePage(draft.index);
+        void renderOnePage(draft.index).catch(handleRenderError);
         return;
       }
       const cur = getPoint(event, draft.index);
@@ -807,7 +822,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
         const box = normalizedBox(start, cur, 2);
         draft.overlay.x = box.x; draft.overlay.y = box.y; draft.overlay.w = box.w; draft.overlay.h = box.h;
       }
-      void renderOnePage(draft.index);
+      void renderOnePage(draft.index).catch(handleRenderError);
       return;
     }
     if (!drag) return;
