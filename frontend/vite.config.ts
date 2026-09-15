@@ -3,13 +3,6 @@ import { join, resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-/**
- * Finds the folder that owns `node_modules/pdfjs-dist`.
- *
- * `import.meta.url` cannot be used here: Vite loads this config from a bundle
- * written to the OS temp folder, so it would resolve to the wrong directory.
- * The npm scripts run with the frontend folder as the working directory.
- */
 function findProjectRoot(): string | null {
   const candidates = [process.cwd(), resolve(process.cwd(), '..')];
   for (const candidate of candidates) {
@@ -20,12 +13,6 @@ function findProjectRoot(): string | null {
   return null;
 }
 
-/**
- * pdf.js fetches CMaps (CJK documents) and standard fonts lazily at runtime.
- * Instead of pointing at a CDN, mirror them from `node_modules/pdfjs-dist`
- * into `public/pdfjs-assets` so they are served by the dev server and copied
- * into `dist/` for the packaged Electron build (offline, no CORS).
- */
 function syncPdfjsAssets(): void {
   const projectRoot = findProjectRoot();
   if (!projectRoot) {
@@ -44,7 +31,10 @@ function syncPdfjsAssets(): void {
     rmSync(target, { recursive: true, force: true });
     mkdirSync(target, { recursive: true });
     for (const folder of ['cmaps', 'standard_fonts']) {
-      cpSync(join(source, folder), join(target, folder), { recursive: true });
+      const folderPath = join(source, folder);
+      if (existsSync(folderPath)) {
+        cpSync(folderPath, join(target, folder), { recursive: true });
+      }
     }
     writeFileSync(marker, version);
     console.log(`[vite] Staged pdf.js cmaps + standard fonts (pdfjs-dist ${version}).`);
@@ -59,35 +49,26 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   build: {
-    // docx is a single vendor module larger than Vite's default warning limit.
-    // It is isolated from the application bundle as a dedicated vendor chunk.
-    chunkSizeWarningLimit: 900,
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('pdf-lib')) {
-              return 'vendor-pdf';
+            // Group heavy document handling modules into a single vendor bundle
+            if (
+              id.includes('pdfjs-dist') ||
+              id.includes('pdf-lib') ||
+              id.includes('docx') ||
+              id.includes('mammoth') ||
+              id.includes('xlsx')
+            ) {
+              return 'vendor-docs';
             }
-            if (id.includes('pdfjs-dist')) {
-              return 'vendor-pdfjs';
+            // Keep UI framework libraries together
+            if (id.includes('react') || id.includes('lucide-react')) {
+              return 'vendor-ui';
             }
-            if (id.includes('docx')) {
-              return 'vendor-docx';
-            }
-            if (id.includes('mammoth')) {
-              return 'vendor-mammoth';
-            }
-            if (id.includes('xlsx')) {
-              return 'vendor-xlsx';
-            }
-            if (id.includes('lucide-react')) {
-              return 'vendor-icons';
-            }
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'vendor-framework';
-            }
-            return 'vendor-utils';
           }
         },
       },

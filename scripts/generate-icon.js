@@ -26,6 +26,26 @@ async function generateIcon() {
   console.log(
     `Generated ${path.relative(rootDir, iconPngPath)} (${pngBuffer.length} bytes).`
   );
+
+  // AppX uses named PNG assets instead of the Windows ICO source.
+  const appxDir = path.join(rootDir, 'assets', 'appx');
+  fs.mkdirSync(appxDir, { recursive: true });
+  const appxAssets = [
+    ['StoreLogo.png', 50, 50],
+    ['Square44x44Logo.png', 44, 44],
+    ['Square150x150Logo.png', 150, 150],
+    ['Wide310x150Logo.png', 310, 150],
+    ['Square71x71Logo.png', 71, 71],
+    ['Square310x310Logo.png', 310, 310],
+    ['SplashScreen.png', 620, 300],
+  ];
+  await Promise.all(
+    appxAssets.map(async ([name, width, height]) => {
+      const target = path.join(appxDir, name);
+      await sharp(source).resize(width, height).png().toFile(target);
+      console.log(`Generated ${path.relative(rootDir, target)}.`);
+    })
+  );
 }
 
 generateIcon().catch((error) => {

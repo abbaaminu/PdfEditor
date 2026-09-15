@@ -150,61 +150,96 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
       out.addPage(copied);
       page = copied;
     }
-    const at = (x: number, y: number) => ({ x, y: height - y });
+    const bounds = (overlay: Overlay) => ({
+      x: overlay.x,
+      y: height - overlay.y - overlay.h,
+      width: overlay.w,
+      height: overlay.h,
+    });
+    const point = (x: number, y: number) => ({ x, y: height - y });
+    const pdfColor = (value: string | undefined, fallback: string) => {
+      const color = hexToRgbTuple(value ?? fallback);
+      return rgb(color.r, color.g, color.b);
+    };
 
     for (const overlay of pageModel.overlays) {
-      if (overlay.kind === 'whiteout') {
-        const c = hexToRgbTuple(overlay.color ?? '#ffffff');
-        page.drawRectangle({ x: overlay.x, y: height - overlay.y - overlay.h, width: overlay.w, height: overlay.h, color: rgb(c.r, c.g, c.b) });
-      } else if (overlay.kind === 'rect' || overlay.kind === 'ellipse') {
-        const border = hexToRgbTuple(overlay.color ?? '#000000');
-        const fill = overlay.fill ? hexToRgbTuple(overlay.fill) : undefined;
-        const common = {
-          x: overlay.x, y: height - overlay.y - overlay.h, width: overlay.w, height: overlay.h,
-          borderColor: rgb(border.r, border.g, border.b), borderWidth: overlay.strokeWidth ?? 2,
-          ...(fill ? { color: rgb(fill.r, fill.g, fill.b), opacity: overlay.opacity ?? 0.15 } : {}),
-        };
-        if (overlay.kind === 'rect') page.drawRectangle(common);
-        else page.drawEllipse(common);
-      } else if (overlay.kind === 'line' || overlay.kind === 'arrow') {
-        const color = hexToRgbTuple(overlay.color ?? '#111111');
-        page.drawLine({ start: at(overlay.x, overlay.y), end: at(overlay.x + overlay.w, overlay.y + overlay.h), thickness: overlay.strokeWidth ?? 2, color: rgb(color.r, color.g, color.b) });
-        if (overlay.kind === 'arrow') {
-          const dx = overlay.w; const dy = overlay.h;
-          const len = Math.max(1, Math.hypot(dx, dy));
-          const ux = dx / len; const uy = dy / len;
-          const cos = Math.cos(Math.PI / 6); const sin = Math.sin(Math.PI / 6);
-          for (const side of [1, -1]) {
-            const px = ux * cos - side * uy * sin;
-            const py = ux * sin + side * uy * cos;
-            page.drawLine({ start: at(overlay.x + overlay.w, overlay.y + overlay.h), end: at(overlay.x + overlay.w - px * 10, overlay.y + overlay.h - py * 10), thickness: overlay.strokeWidth ?? 2, color: rgb(color.r, color.g, color.b) });
+      switch (overlay.kind) {
+        case 'text': {
+          if (overlay.fill) {
+            page.drawRectangle({ ...bounds(overlay), color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.85 });
           }
+          const size = overlay.fontSize ?? 16;
+          const textFont = overlay.bold ? boldFont : font;
+          const label = sanitizeWinAnsiText(overlay.text ?? '');
+          const textWidth = textFont.widthOfTextAtSize(label, size);
+          const x = overlay.textAlign === 'center'
+            ? overlay.x + (overlay.w - textWidth) / 2
+            : overlay.textAlign === 'right' ? overlay.x + overlay.w - textWidth : overlay.x;
+          page.drawText(label, { x, y: height - overlay.y - size, size, font: textFont, color: pdfColor(overlay.color, '#111111') });
+          break;
         }
-      } else if (overlay.kind === 'pen' || overlay.kind === 'highlight') {
-        const color = hexToRgbTuple(overlay.color ?? '#111111');
-        const mul = overlay.kind === 'highlight' ? 4 : 1;
-        const opacity = overlay.kind === 'highlight' ? 0.35 : 1;
-        const pts = overlay.points ?? [];
-        for (let i = 1; i < pts.length; i += 1) {
-          page.drawLine({ start: at(pts[i - 1].x, pts[i - 1].y), end: at(pts[i].x, pts[i].y), thickness: (overlay.strokeWidth ?? 2) * mul, color: rgb(color.r, color.g, color.b), opacity });
+        case 'rect':
+          page.drawRectangle({
+            ...bounds(overlay),
+            borderColor: pdfColor(overlay.color, '#000000'),
+            borderWidth: overlay.strokeWidth ?? 2,
+            ...(overlay.fill ? { color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.15 } : {}),
+          });
+          break;
+        case 'ellipse':
+          page.drawEllipse({
+            ...bounds(overlay),
+            borderColor: pdfColor(overlay.color, '#000000'),
+            borderWidth: overlay.strokeWidth ?? 2,
+            ...(overlay.fill ? { color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.15 } : {}),
+          });
+          break;
+        case 'whiteout':
+          page.drawRectangle({ ...bounds(overlay), color: rgb(0, 0, 0) });
+          break;
+        case 'line':
+        case 'arrow': {
+          const color = pdfColor(overlay.color, '#111111');
+          const thickness = overlay.strokeWidth ?? 2;
+          const start = point(overlay.x, overlay.y);
+          const end = point(overlay.x + overlay.w, overlay.y + overlay.h);
+          page.drawLine({ start, end, thickness, color });
+          if (overlay.kind === 'arrow') {
+            const length = Math.max(1, Math.hypot(overlay.w, overlay.h));
+            const ux = overlay.w / length;
+            const uy = -overlay.h / length;
+            const cos = Math.cos(Math.PI / 6);
+            const sin = Math.sin(Math.PI / 6);
+            for (const side of [1, -1]) {
+              const headX = ux * cos - side * uy * sin;
+              const headY = ux * sin + side * uy * cos;
+              page.drawLine({ start: end, end: { x: end.x - headX * 10, y: end.y - headY * 10 }, thickness, color });
+            }
+          }
+          break;
         }
-      } else if (overlay.kind === 'stamp' && overlay.image) {
-        const image = overlay.image.kind === 'png' ? await out.embedPng(overlay.image.bytes) : await out.embedJpg(overlay.image.bytes);
-        page.drawImage(image, { x: overlay.x, y: height - overlay.y - overlay.h, width: overlay.w, height: overlay.h, opacity: overlay.opacity ?? 1 });
-      } else if (overlay.kind === 'text') {
-        const c = hexToRgbTuple(overlay.color ?? '#111111');
-        if (overlay.fill) {
-          const bg = hexToRgbTuple(overlay.fill);
-          page.drawRectangle({ x: overlay.x, y: height - overlay.y - overlay.h, width: overlay.w, height: overlay.h, color: rgb(bg.r, bg.g, bg.b), opacity: overlay.opacity ?? 0.85 });
+        case 'pen':
+        case 'highlight': {
+          const points = overlay.points ?? [];
+          const thickness = (overlay.strokeWidth ?? 2) * (overlay.kind === 'highlight' ? 4 : 1);
+          const opacity = overlay.kind === 'highlight' ? 0.35 : 1;
+          for (let index = 1; index < points.length; index += 1) {
+            page.drawLine({
+              start: point(points[index - 1].x, points[index - 1].y),
+              end: point(points[index].x, points[index].y),
+              thickness,
+              color: pdfColor(overlay.color, '#111111'),
+              opacity,
+            });
+          }
+          break;
         }
-        const size = overlay.fontSize ?? 16;
-        const f = overlay.bold ? boldFont : font;
-        // WinAnsi cannot encode ligatures/smart quotes/emoji, so normalise the
-        // text first — otherwise drawText() throws and the export fails.
-        const label = sanitizeWinAnsiText(overlay.text ?? '');
-        const textWidth = f.widthOfTextAtSize(label, size);
-        const baseX = overlay.textAlign === 'center' ? overlay.x + (overlay.w - textWidth) / 2 : overlay.textAlign === 'right' ? overlay.x + overlay.w - textWidth : overlay.x;
-        page.drawText(label, { x: baseX, y: height - overlay.y - size, size, font: f, color: rgb(c.r, c.g, c.b) });
+        case 'stamp':
+          if (overlay.image) {
+            const image = overlay.image.kind === 'png' ? await out.embedPng(overlay.image.bytes) : await out.embedJpg(overlay.image.bytes);
+            page.drawImage(image, { ...bounds(overlay), opacity: overlay.opacity ?? 1 });
+          }
+          break;
       }
     }
   }

@@ -1,24 +1,21 @@
 // frontend/src/lib/supabase.ts
-// Central Supabase client. Reads the public project config from Vite env vars.
-//
-//   VITE_SUPABASE_URL      -> https://<project-ref>.supabase.co
-//   VITE_SUPABASE_ANON_KEY -> anon/public API key
-//
-// If the variables are missing (e.g. local dev without a linked project) the
-// module exports a null client plus isSupabaseConfigured=false so the rest of
-// the app can degrade gracefully instead of crashing at import time.
-
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+const SUPABASE_URL = 'https://nabxjubdxxqewrqocsbz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYnhqdWJkeHhxZXdycW9jc2J6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjAzMzYsImV4cCI6MjEwNDMzMzMzNn0.6s8Iw85vO8pn0Y-KPjpUb8b0OoVO2cYzNXjMxJYLcAQ';
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = true;
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl as string, supabaseAnonKey as string)
-  : null;
+export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/** Sign out the current user and clear local session state. */
+export async function signOutUser(): Promise<void> {
+  if (supabase) {
+    await supabase.auth.signOut();
+  }
+  localStorage.clear();
+}
 
 /** Read the signed-in user's Pro entitlement from the profiles table. */
 export async function fetchProfileProStatus(userId: string): Promise<boolean | null> {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,17 +10,39 @@ const { imagesToPDF } = require('./backend/imageToPdf');
 
 let mainWin;
 
+function getWindowIcon() {
+  const candidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'icon.png'),
+        path.join(__dirname, 'assets', 'icon.png'),
+        path.join(process.resourcesPath, 'assets', 'icon.png'),
+      ]
+    : [path.join(__dirname, 'assets', 'icon.png')];
+
+  for (const iconPath of candidates) {
+    if (!fs.existsSync(iconPath)) continue;
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) return icon;
+  }
+
+  return nativeImage.createEmpty();
+}
+
 function createWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icon.ico');
+  const appIcon = getWindowIcon();
   mainWin = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(__dirname, 'assets/icon.ico'),
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  if (!appIcon.isEmpty()) mainWin.setIcon(appIcon);
 
   // External destinations opened with window.open (e.g. the hosted checkout the
   // upgrade modal uses on desktop) belong in the user's default browser, not in
@@ -48,6 +70,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.abbaaminu.pdfeditor');
+  }
   createWindow();
 
   app.on('activate', () => {

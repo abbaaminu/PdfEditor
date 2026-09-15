@@ -1,18 +1,13 @@
 {
   "name": "pdfeditor",
-  "version": "1.0.3",
+  "version": "1.0.0",
   "main": "main.js",
   "description": "A desktop PDF editing and management tool built with React and Electron.",
   "author": "Abba Aminu <abbaaminu201215@gmail.com>",
   "homepage": "./",
   "build": {
-    "appId": "com.abbaaminu.pdfeditor",
-    "productName": "PdfEditor",
-    "publish": {
-      "provider": "github",
-      "owner": "abbaaminu",
-      "repo": "PdfEditor"
-    },
+    "appId": "ABBAAMINU.PDFDocSuite",
+    "productName": "PDF and Doc Suite",
     "directories": {
       "buildResources": "assets",
       "output": "release"
@@ -24,11 +19,14 @@
       "frontend/dist/**/*",
       "backend/**/*.js",
       "backend/package.json",
+      "assets/**/*",
       "main.js",
       "preload.js",
       "package.json"
     ],
     "asarUnpack": [
+      "assets/icon.png",
+      "assets/icon.ico",
       "node_modules/pdf-poppler/lib/**/*",
       "node_modules/@img/**/*",
       "node_modules/sharp/**/*"
@@ -37,10 +35,29 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "appx",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"
+    },
+    "appx": {
+      "identityName": "ABBAAMINU.PDFDocSuite",
+      "publisher": "CN=C58C6A36-C9F8-4CCC-971E-125217DD5B2D",
+      "publisherDisplayName": "ABBA AMINU",
+      "displayName": "PDF and Doc Suite",
+      "applicationId": "PdfEditor",
+      "backgroundColor": "#0f172a",
+      "languages": [
+        "en-US"
+      ]
     },
     "mac": {
       "category": "public.app-category.productivity",
@@ -48,11 +65,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ]
     },
@@ -62,11 +85,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     }
@@ -84,6 +111,7 @@
     "package": "npm run generate-icon && npm run build:frontend && electron-builder",
     "dist": "npm run package",
     "dist:win": "npm run generate-icon && npm run build:frontend && electron-builder --win",
+    "dist:appx": "npm run generate-icon && npm run build:frontend && electron-builder --win appx",
     "dist:mac": "npm run generate-icon && npm run build:frontend && electron-builder --mac",
     "dist:linux": "npm run generate-icon && npm run build:frontend && electron-builder --linux",
     "dist:all": "npm run generate-icon && npm run build:frontend && electron-builder -wml"
@@ -98,6 +126,7 @@
     "fs-extra": "^11.3.6",
     "lucide-react": "^1.41.0",
     "mammoth": "^1.12.2",
+    "object-assign": "^4.1.1",
     "pdf-lib": "^1.17.1",
     "pdf-poppler": "^0.2.3",
     "pdf2pic": "^3.2.0",
@@ -106,11 +135,9 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0",
     "concurrently": "^10.0.5",
     "electron": "^29.0.0",
     "electron-builder": "^24.13.3",
-    "electron-rebuild": "^3.2.9",
     "png-to-ico": "^3.0.2",
     "wait-on": "^9.1.0"
   }

@@ -20,6 +20,7 @@ import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from './store/a
 import { PDFDocument } from 'pdf-lib';
 import { compressPdfToPdf } from './lib/pdfRenderer';
 import type { CompressionPresetKey } from './lib/pdfRenderer';
+import logo from '../../assets/icon.png';
 
 type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
 
@@ -184,7 +185,7 @@ function Dashboard() {
           {/* Logo + Title Section */}
           <div className="flex items-center gap-3">
             <img
-              src="/icon.png"
+              src={logo}
               alt="PDF & Doc Suite Logo"
               className="h-9 w-9 object-contain drop-shadow-md"
             />
