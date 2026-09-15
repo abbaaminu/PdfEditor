@@ -13,7 +13,6 @@ jobs:
   release:
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
 
@@ -37,9 +36,20 @@ jobs:
       - name: Build Frontend Assets
         run: npm run build --prefix frontend
 
-      - name: Build and Publish Electron Installers
+      - name: Package Electron App
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run package -- --publish always
+        run: npm run package
+
+      - name: Publish Binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
