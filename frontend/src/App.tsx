@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import {
   BadgeCheck,
+  Download,
   FilePlus,
   FileText,
+  Monitor,
   Scissors,
   Sparkles,
 } from 'lucide-react';
@@ -195,7 +197,7 @@ function Dashboard() {
             </h1>
           </div>
 
-          <nav className="flex gap-2">
+          <nav className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setActiveTab('pdf-tools')}
@@ -240,6 +242,31 @@ function Dashboard() {
             >
               <FilePlus className="h-4 w-4" /> Doc Creator
             </button>
+
+            {/* Microsoft Store & GitHub Desktop Releases Links */}
+            <div className="ml-2 flex items-center gap-2 border-l border-slate-800 pl-3">
+              <a
+                href="https://apps.microsoft.com/store/detail/9NFXGFVZG41Z?cid=DevShareMCLPCS"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+                title="Get PDF & Doc Suite on Microsoft Store"
+              >
+                <Monitor className="h-3.5 w-3.5 text-sky-400" />
+                <span>Get Store App</span>
+              </a>
+
+              <a
+                href="https://github.com/abbaaminu/PdfEditor/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+                title="Download Windows, macOS & Linux installers"
+              >
+                <Download className="h-3.5 w-3.5 text-purple-400" />
+                <span>Desktop App</span>
+              </a>
+            </div>
           </nav>
         </div>
 
