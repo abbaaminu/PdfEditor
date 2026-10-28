@@ -78,7 +78,7 @@ jobs:
 
       - name: Build Android Release APK & Bundle
         run: |
-          cd android
+          cd frontend/android
           ./gradlew assembleRelease bundleRelease
 
       - name: Upload Android Artifacts
