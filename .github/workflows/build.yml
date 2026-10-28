@@ -72,7 +72,9 @@ jobs:
           npm run build --prefix frontend
 
       - name: Sync Capacitor Android
-        run: npx cap sync android
+        run: |
+          cd frontend
+          npx cap sync android
 
       - name: Build Android Release APK & Bundle
         run: |
