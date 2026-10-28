@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PDF&amp;DOC SUITE</string>
+    <string name="title_activity_main">PDF&amp;DOC SUITE</string>
+    <string name="package_name">pdf.stackbuildco.com</string>
+    <string name="custom_url_scheme">pdf.stackbuildco.com</string>
+</resources>

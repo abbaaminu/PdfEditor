@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build-desktop:
     strategy:
       fail-fast: false
       matrix:
@@ -41,15 +41,74 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run package -- --publish never
 
+      - name: Upload Desktop Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-builds-${{ matrix.os }}
+          path: release/
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Root & Frontend Dependencies
+        run: |
+          npm install
+          npm install --prefix frontend --ignore-scripts
+          npm run build --prefix frontend
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build Android Release APK & Bundle
+        run: |
+          cd android
+          ./gradlew assembleRelease bundleRelease
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-builds
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+
+  publish:
+    needs: [build-desktop, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Prepare Artifacts for Release
+        run: |
+          mkdir -p final-release
+          find all-artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.apk" -o -name "*.aab" \) -exec cp {} final-release/ \;
+
       - name: Publish Binaries to GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
-            release/*.deb
+            final-release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
