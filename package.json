@@ -52,12 +52,13 @@
       "identityName": "ABBAAMINU.PDFDocSuite",
       "publisher": "CN=C58C6A36-C9F8-4CCC-971E-125217DD5B2D",
       "publisherDisplayName": "ABBA AMINU",
-      "displayName": "PDF and Doc Suite",
-      "applicationId": "PdfEditor",
+      "displayName": "PDF &amp; Doc Suite - Edit, Merge, Convert &amp; Compress PDF",
+      "applicationId": "ABBAAMINUPDFDocSuite",
       "backgroundColor": "#0f172a",
       "languages": [
         "en-US"
-      ]
+      ],
+      "artifactName": "ABBAAMINU.PDFDocSuite_${version}_${arch}__p1x777wvd0y9p.${ext}"
     },
     "mac": {
       "category": "public.app-category.productivity",

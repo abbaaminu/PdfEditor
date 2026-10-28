@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BadgeCheck,
   Download,
@@ -20,6 +20,8 @@ import { WordViewer } from './components/WordViewer';
 import { AuthProvider } from './store/AuthProvider';
 import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from './store/auth-context';
 import { PDFDocument } from 'pdf-lib';
+import { subscribeToLaunchedFiles } from './lib/launchQueue';
+import type { LaunchedFile } from './lib/launchQueue';
 import { compressPdfToPdf } from './lib/pdfRenderer';
 import type { CompressionPresetKey } from './lib/pdfRenderer';
 import logo from '../../assets/icon.png';
@@ -97,6 +99,21 @@ function Dashboard() {
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<BusyMap>({});
+  /**
+   * File handed over by the OS when the installed PWA is launched as the
+   * default handler for `.pdf` / `.docx` files (see `public/manifest`).
+   */
+  const [launchedFile, setLaunchedFile] = useState<LaunchedFile | null>(null);
+
+  useEffect(
+    () =>
+      // No Launch Queue support (Safari/Firefox/Electron) → nothing to wire up.
+      subscribeToLaunchedFiles((launched) => {
+        setLaunchedFile(launched);
+        setActiveTab(launched.kind === 'docx' ? 'viewer' : 'pdf-tools');
+      }),
+    []
+  );
 
   const openUpgradeModal = (message?: string) => {
     setUpgradeMessage(message);
@@ -318,14 +335,20 @@ function Dashboard() {
       <main className="mx-auto max-w-6xl p-8">
         <div className={activeTab === 'pdf-tools' ? '' : 'hidden'}>
           <PdfTools
+            // Every OS launch remounts the tools panel so it opens on the
+            // editor with the freshly launched document.
+            key={launchedFile ? launchedFile.id : 'initial'}
             busy={busy}
+            initialPdfFile={launchedFile?.kind === 'pdf' ? launchedFile : null}
             onRunTool={(opId, files, options) => executeTool(opId, files, options)}
             onRequireUpgrade={(message) => openUpgradeModal(message)}
           />
         </div>
 
         {activeTab === 'pdf-viewer' && <PdfViewer />}
-        {activeTab === 'viewer' && <WordViewer />}
+        {activeTab === 'viewer' && (
+          <WordViewer initialFile={launchedFile?.kind === 'docx' ? launchedFile.file : null} />
+        )}
         {activeTab === 'creator' && (
           <DocumentCreator onFreeTrialExhausted={() => openUpgradeModal(FREE_TRIAL_LIMIT_MESSAGE)} />
         )}

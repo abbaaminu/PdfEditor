@@ -4,7 +4,7 @@
 // layers, and a pdf-lib export pipeline that applies page order/rotation and
 // every overlay type (text, pen, highlight, shapes, whiteout, stamps).
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { degrees, PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import type { PDFImage, PDFPage } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import { loadPdfDocument } from '../lib/pdfjs';
 import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
@@ -28,6 +29,11 @@ import { useToast } from './toast-context';
 interface PdfEditorProps {
   canStartAction: () => boolean;
   incrementUsage: () => void;
+  /**
+   * Document to open on mount / when a new file arrives (OS file handler).
+   * `null` keeps the editor on its empty "choose a PDF" state.
+   */
+  initialFile?: File | null;
 }
 
 type ToolMode =
@@ -110,8 +116,14 @@ function downloadPdf(bytes: Uint8Array, fileName: string): void {
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;
+  link.rel = 'noopener';
+  // The anchor must be in the document for the click to be treated as a user
+  // download by every browser (and by Electron's file:// renderer).
+  document.body.appendChild(link);
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  link.remove();
+  // Revoking synchronously can abort the download before it starts.
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 const rotateCw = (value: PageModel['rotation']): PageModel['rotation'] =>
@@ -129,34 +141,130 @@ function makeBlankPage(width = 595.28, height = 841.89): PageModel {
   };
 }
 
+/** Where a page actually lives on the printed sheet, as pdf.js lays it out. */
+interface PageGeometry {
+  /** CropBox lower-left corner in unrotated user space. */
+  x: number;
+  y: number;
+  /** CropBox size in unrotated user space. */
+  width: number;
+  height: number;
+  /** Clockwise rotation applied by the viewer (file /Rotate + editor rotation). */
+  rotation: number;
+}
+
+function normalizeRotation(value: number): 0 | 90 | 180 | 270 {
+  const snapped = (Math.round(value / 90) * 90) % 360;
+  return ((snapped + 360) % 360) as 0 | 90 | 180 | 270;
+}
+
+/**
+ * pdf.js lays a page out in "view" space: origin at the top-left corner, y
+ * pointing down, one unit per PDF point at scale 1. pdf-lib writes into
+ * unrotated user space (origin bottom-left, y up).
+ *
+ * Converting between the two keeps an annotation exactly where it was drawn,
+ * even when the source page carries a /Rotate flag or a non-zero CropBox
+ * origin — both are common in scanned and print-ready files, and ignoring them
+ * made saved overlays land outside the visible page.
+ */
+function displayToUser(geometry: PageGeometry, point: Point): Point {
+  switch (normalizeRotation(geometry.rotation)) {
+    case 90:
+      return { x: geometry.x + point.y, y: geometry.y + point.x };
+    case 180:
+      return { x: geometry.x + geometry.width - point.x, y: geometry.y + point.y };
+    case 270:
+      return {
+        x: geometry.x + geometry.width - point.y,
+        y: geometry.y + geometry.height - point.x,
+      };
+    default:
+      return { x: geometry.x + point.x, y: geometry.y + geometry.height - point.y };
+  }
+}
+
+/** Maps a display-space box onto an axis-aligned box in user space. */
+function displayBoxToUser(
+  geometry: PageGeometry,
+  box: { x: number; y: number; w: number; h: number }
+): { x: number; y: number; width: number; height: number } {
+  const topLeft = displayToUser(geometry, { x: box.x, y: box.y });
+  const bottomRight = displayToUser(geometry, { x: box.x + box.w, y: box.y + box.h });
+  return {
+    x: Math.min(topLeft.x, bottomRight.x),
+    y: Math.min(topLeft.y, bottomRight.y),
+    width: Math.abs(bottomRight.x - topLeft.x),
+    height: Math.abs(bottomRight.y - topLeft.y),
+  };
+}
+
+/** Sniffs the real image format; file extensions lie far too often. */
+function detectImageKind(bytes: ArrayBuffer | Uint8Array): 'png' | 'jpg' | null {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (view.length >= 8 && view[0] === 0x89 && view[1] === 0x50 && view[2] === 0x4e && view[3] === 0x47) {
+    return 'png';
+  }
+  if (view.length >= 3 && view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff) {
+    return 'jpg';
+  }
+  return null;
+}
+
+/** Embeds a stamp, falling back to the other decoder before failing an export. */
+async function embedStampImage(out: PDFDocument, image: NonNullable<Overlay['image']>): Promise<PDFImage> {
+  const kind = detectImageKind(image.bytes) ?? image.kind;
+  try {
+    return kind === 'png' ? await out.embedPng(image.bytes) : await out.embedJpg(image.bytes);
+  } catch {
+    return kind === 'png' ? await out.embedJpg(image.bytes) : await out.embedPng(image.bytes);
+  }
+}
+
 const clampZoom = (value: number) => Math.min(3, Math.max(0.25, Math.round(value * 100) / 100));
 
 async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   const src = await PDFDocument.load(originalPdfBytes.slice(0), { ignoreEncryption: true });
-  const font = await out.embedFont(StandardFonts.Helvetica);
-  const boldFont = await out.embedFont(StandardFonts.HelveticaBold);
+  const [font, boldFont, italicFont, boldItalicFont] = await Promise.all([
+    out.embedFont(StandardFonts.Helvetica),
+    out.embedFont(StandardFonts.HelveticaBold),
+    out.embedFont(StandardFonts.HelveticaOblique),
+    out.embedFont(StandardFonts.HelveticaBoldOblique),
+  ]);
 
   for (const pageModel of pages) {
-    const width = pageModel.blankWidth ?? 595.28;
-    let height = pageModel.blankHeight ?? 841.89;
-    let page = pageModel.sourceIndex < 0 ? out.addPage([width, height]) : undefined;
+    const blankWidth = pageModel.blankWidth ?? 595.28;
+    const blankHeight = pageModel.blankHeight ?? 841.89;
+    let page: PDFPage;
+    let geometry: PageGeometry;
 
-    if (!page) {
+    if (pageModel.sourceIndex < 0) {
+      page = out.addPage([blankWidth, blankHeight]);
+      geometry = {
+        x: 0,
+        y: 0,
+        width: blankWidth,
+        height: blankHeight,
+        rotation: normalizeRotation(pageModel.rotation),
+      };
+      page.setRotation(degrees(geometry.rotation));
+    } else {
       const srcPage = await src.getPage(pageModel.sourceIndex);
-      height = srcPage.getHeight();
+      const box = srcPage.getCropBox();
+      // Viewers apply the file's own /Rotate on top of the editor's rotation,
+      // so both are folded into the exported page instead of one replacing the
+      // other (which re-oriented pages the user never touched).
+      const rotation = normalizeRotation(srcPage.getRotation().angle + pageModel.rotation);
       const [copied] = await out.copyPages(src, [pageModel.sourceIndex]);
-      if (pageModel.rotation !== 0) copied.setRotation(degrees(pageModel.rotation));
-      out.addPage(copied);
-      page = copied;
+      copied.setRotation(degrees(rotation));
+      page = out.addPage(copied);
+      geometry = { x: box.x, y: box.y, width: box.width, height: box.height, rotation };
     }
-    const bounds = (overlay: Overlay) => ({
-      x: overlay.x,
-      y: height - overlay.y - overlay.h,
-      width: overlay.w,
-      height: overlay.h,
-    });
-    const point = (x: number, y: number) => ({ x, y: height - y });
+
+    const bounds = (overlay: Overlay) => displayBoxToUser(geometry, overlay);
+    const point = (x: number, y: number) => displayToUser(geometry, { x, y });
+    const textRotation = degrees(geometry.rotation);
     const pdfColor = (value: string | undefined, fallback: string) => {
       const color = hexToRgbTuple(value ?? fallback);
       return rgb(color.r, color.g, color.b);
@@ -165,17 +273,30 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
     for (const overlay of pageModel.overlays) {
       switch (overlay.kind) {
         case 'text': {
+          const label = sanitizeWinAnsiText(overlay.text ?? '');
+          if (!label.trim()) break;
           if (overlay.fill) {
             page.drawRectangle({ ...bounds(overlay), color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.85 });
           }
           const size = overlay.fontSize ?? 16;
-          const textFont = overlay.bold ? boldFont : font;
-          const label = sanitizeWinAnsiText(overlay.text ?? '');
+          const textFont = overlay.italic
+            ? overlay.bold ? boldItalicFont : italicFont
+            : overlay.bold ? boldFont : font;
           const textWidth = textFont.widthOfTextAtSize(label, size);
           const x = overlay.textAlign === 'center'
             ? overlay.x + (overlay.w - textWidth) / 2
             : overlay.textAlign === 'right' ? overlay.x + overlay.w - textWidth : overlay.x;
-          page.drawText(label, { x, y: height - overlay.y - size, size, font: textFont, color: pdfColor(overlay.color, '#111111') });
+          // pdf-lib rotates a label about its baseline origin, which is exactly
+          // what keeps text upright on /Rotate 90 / 180 / 270 pages.
+          const origin = point(x, overlay.y + size);
+          page.drawText(label, {
+            x: origin.x,
+            y: origin.y,
+            size,
+            font: textFont,
+            color: pdfColor(overlay.color, '#111111'),
+            rotate: textRotation,
+          });
           break;
         }
         case 'rect':
@@ -186,16 +307,26 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
             ...(overlay.fill ? { color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.15 } : {}),
           });
           break;
-        case 'ellipse':
+        case 'ellipse': {
+          // pdf-lib takes an ellipse's *centre* plus x/y *radii*. It used to be
+          // handed a top-left box, so the call silently drew pdf-lib's default
+          // 200pt circle around the corner and the real oval was never saved.
+          const box = bounds(overlay);
           page.drawEllipse({
-            ...bounds(overlay),
+            x: box.x + box.width / 2,
+            y: box.y + box.height / 2,
+            xScale: Math.max(box.width / 2, 0.5),
+            yScale: Math.max(box.height / 2, 0.5),
             borderColor: pdfColor(overlay.color, '#000000'),
             borderWidth: overlay.strokeWidth ?? 2,
             ...(overlay.fill ? { color: pdfColor(overlay.fill, '#ffffff'), opacity: overlay.opacity ?? 0.15 } : {}),
           });
           break;
+        }
         case 'whiteout':
-          page.drawRectangle({ ...bounds(overlay), color: rgb(0, 0, 0) });
+          // Whiteout is a redaction: keep the colour the user picked (white by
+          // default) instead of always stamping a black block over the page.
+          page.drawRectangle({ ...bounds(overlay), color: pdfColor(overlay.color, '#ffffff') });
           break;
         case 'line':
         case 'arrow': {
@@ -205,28 +336,29 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
           const end = point(overlay.x + overlay.w, overlay.y + overlay.h);
           page.drawLine({ start, end, thickness, color });
           if (overlay.kind === 'arrow') {
-            const length = Math.max(1, Math.hypot(overlay.w, overlay.h));
-            const ux = overlay.w / length;
-            const uy = -overlay.h / length;
-            const cos = Math.cos(Math.PI / 6);
-            const sin = Math.sin(Math.PI / 6);
+            // Build the head in user space so it follows the mapped direction.
+            const angle = Math.atan2(end.y - start.y, end.x - start.x);
             for (const side of [1, -1]) {
-              const headX = ux * cos - side * uy * sin;
-              const headY = ux * sin + side * uy * cos;
-              page.drawLine({ start: end, end: { x: end.x - headX * 10, y: end.y - headY * 10 }, thickness, color });
+              const headAngle = angle + side * (Math.PI / 6) + Math.PI;
+              page.drawLine({
+                start: end,
+                end: { x: end.x + Math.cos(headAngle) * 10, y: end.y + Math.sin(headAngle) * 10 },
+                thickness,
+                color,
+              });
             }
           }
           break;
         }
         case 'pen':
         case 'highlight': {
-          const points = overlay.points ?? [];
+          const points = (overlay.points ?? []).map((strokePoint) => point(strokePoint.x, strokePoint.y));
           const thickness = (overlay.strokeWidth ?? 2) * (overlay.kind === 'highlight' ? 4 : 1);
           const opacity = overlay.kind === 'highlight' ? 0.35 : 1;
           for (let index = 1; index < points.length; index += 1) {
             page.drawLine({
-              start: point(points[index - 1].x, points[index - 1].y),
-              end: point(points[index].x, points[index].y),
+              start: points[index - 1],
+              end: points[index],
               thickness,
               color: pdfColor(overlay.color, '#111111'),
               opacity,
@@ -236,8 +368,18 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
         }
         case 'stamp':
           if (overlay.image) {
-            const image = overlay.image.kind === 'png' ? await out.embedPng(overlay.image.bytes) : await out.embedJpg(overlay.image.bytes);
-            page.drawImage(image, { ...bounds(overlay), opacity: overlay.opacity ?? 1 });
+            const image = await embedStampImage(out, overlay.image);
+            // drawImage rotates about (x, y), so anchor the bitmap's display
+            // bottom-left corner and rotate the whole image with the page.
+            const origin = point(overlay.x, overlay.y + overlay.h);
+            page.drawImage(image, {
+              x: origin.x,
+              y: origin.y,
+              width: overlay.w,
+              height: overlay.h,
+              opacity: overlay.opacity ?? 1,
+              rotate: textRotation,
+            });
           }
           break;
       }
@@ -249,7 +391,11 @@ async function buildEditedPdf(originalPdfBytes: Uint8Array, pages: PageModel[]):
 const HANDLE_SIZE = 7;
 
 
-export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementUsage }) => {
+export const PdfEditor: React.FC<PdfEditorProps> = ({
+  canStartAction,
+  incrementUsage,
+  initialFile = null,
+}) => {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const stampInputRef = useRef<HTMLInputElement>(null);
@@ -435,10 +581,17 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
     const scale = zoom * dpr;
     const version = renderVersionRef.current;
     if (pm.sourceIndex < 0) {
-      canvas.width = Math.ceil((pm.blankWidth ?? 595) * scale);
-      canvas.height = Math.ceil((pm.blankHeight ?? 842) * scale);
-      canvas.style.width = `${(pm.blankWidth ?? 595) * zoom}px`;
-      canvas.style.height = `${(pm.blankHeight ?? 842) * zoom}px`;
+      // Blank pages have no pdf.js viewport, so their display size has to be
+      // derived here — including the 90°/270° swap the export writes as /Rotate.
+      const baseWidth = pm.blankWidth ?? 595;
+      const baseHeight = pm.blankHeight ?? 842;
+      const swaps = pm.rotation === 90 || pm.rotation === 270;
+      const displayWidth = swaps ? baseHeight : baseWidth;
+      const displayHeight = swaps ? baseWidth : baseHeight;
+      canvas.width = Math.ceil(displayWidth * scale);
+      canvas.height = Math.ceil(displayHeight * scale);
+      canvas.style.width = `${displayWidth * zoom}px`;
+      canvas.style.height = `${displayHeight * zoom}px`;
       const bg = canvas.getContext('2d');
       if (bg) { bg.fillStyle = '#ffffff'; bg.fillRect(0, 0, canvas.width, canvas.height); }
     } else {
@@ -526,7 +679,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
   }, [pages, fileName, isOpen, showThumbs]);
 
 
-  const loadFile = async (file: File) => {
+  const loadFile = useCallback(async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
       setError('Please choose a PDF file.');
       return;
@@ -569,7 +722,17 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({ canStartAction, incrementU
     } finally {
       setLoading(false);
     }
-  };
+    // Every dependency above is a ref or a stable setter.
+  }, []);
+
+  // Open documents handed over by the OS file handler (installed PWA).
+  // The load is deferred one task: `loadFile` sets state immediately, which
+  // must not happen inside the effect body itself.
+  useEffect(() => {
+    if (!initialFile) return;
+    const handle = window.setTimeout(() => void loadFile(initialFile), 0);
+    return () => window.clearTimeout(handle);
+  }, [initialFile, loadFile]);
 
   useEffect(() => {
     const stampUrls = stampUrlsRef.current;
