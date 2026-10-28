@@ -18,6 +18,7 @@ import { FREE_TRIAL_LIMIT_MESSAGE, MAX_FREE_USES, useAuthStore } from '../store/
 import { FileQueue } from './FileQueue';
 import type { QueuedFile } from './FileQueue';
 import { convertPdfToImages } from '../lib/pdfRenderer';
+import type { LaunchedFile } from '../lib/launchQueue';
 
 export type PdfToolId =
   | 'split-pdf'
@@ -133,6 +134,11 @@ interface PdfToolsProps {
   onRunTool: (opId: PdfToolId, files: QueuedFile[], options: Record<string, unknown>) => void;
   /** Opens the upgrade modal when a free-trial gate blocks a client-side tool. */
   onRequireUpgrade?: (message?: string) => void;
+  /**
+   * PDF handed over by the OS file handler. When present the editor tool is
+   * opened automatically and the document is loaded straight into the canvas.
+   */
+  initialPdfFile?: LaunchedFile | null;
 }
 
 const COMPRESSION_PRESETS: SegOption<CompressionPreset>[] = [
@@ -689,9 +695,18 @@ function ImagesToPdfPanel({
 /* ------------------------------------------------------------------ */
 /* PdfTools container: tool grid + active configuration panel           */
 /* ------------------------------------------------------------------ */
-export const PdfTools: React.FC<PdfToolsProps> = ({ busy, onRunTool, onRequireUpgrade }) => {
+export const PdfTools: React.FC<PdfToolsProps> = ({
+  busy,
+  onRunTool,
+  onRequireUpgrade,
+  initialPdfFile = null,
+}) => {
   const { isProUser, usageCount, incrementUsage } = useAuthStore();
-  const [active, setActive] = useState<PdfToolId | null>(null);
+  // A PDF launched from the OS opens the editor directly; `App` remounts this
+  // component (fresh `key`) for every launch, so plain state initialisation is
+  // enough and no synchronising effect is needed.
+  const [active, setActive] = useState<PdfToolId | null>(initialPdfFile ? 'edit-pdf' : null);
+
   const [queues, setQueues] = useState<Record<PdfToolId, QueuedFile[]>>({
     'split-pdf': [],
     'compress-pdf': [],
@@ -829,6 +844,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ busy, onRunTool, onRequireUp
           <PdfEditor
             canStartAction={canStartAction}
             incrementUsage={incrementUsage}
+            initialFile={initialPdfFile?.file ?? null}
           />
         )}
       </div>

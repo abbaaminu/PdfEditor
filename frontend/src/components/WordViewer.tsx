@@ -21,7 +21,15 @@ function collectPageNodes(container: HTMLElement | null): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(PAGE_SELECTOR));
 }
 
-export const WordViewer: React.FC = () => {
+interface WordViewerProps {
+  /**
+   * Document to open on mount / when a new file arrives (OS file handler).
+   * `null` keeps the viewer on its empty "choose a .docx" state.
+   */
+  initialFile?: File | null;
+}
+
+export const WordViewer: React.FC<WordViewerProps> = ({ initialFile = null }) => {
   const [fileName, setFileName] = useState('');
   const [hasContent, setHasContent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -79,7 +87,7 @@ export const WordViewer: React.FC = () => {
     };
   }, [syncPageTracking]);
 
-  const renderDocument = async (arrayBuffer: ArrayBuffer) => {
+  const renderDocument = useCallback(async (arrayBuffer: ArrayBuffer) => {
     const container = containerRef.current;
     if (!container) return;
 
@@ -101,38 +109,51 @@ export const WordViewer: React.FC = () => {
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
     syncPageTracking();
-  };
+  }, [syncPageTracking]);
+
+  const loadDocxFile = useCallback(
+    async (file: File) => {
+      setError('');
+      setFileName(file.name);
+      setHasContent(false);
+      setTotalPages(0);
+      setCurrentPage(1);
+      containerRef.current?.replaceChildren();
+
+      try {
+        setIsLoading(true);
+        const bytes = new Uint8Array(await file.arrayBuffer()).slice();
+        await renderDocument(bytes.buffer);
+      } catch (err) {
+        setError(
+          `Could not parse "${file.name}": ${
+            err instanceof Error ? err.message : 'the file is not a valid .docx document'
+          }`
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [renderDocument]
+  );
+
+  // Open documents handed over by the OS file handler (installed PWA).
+  // Deferred one task because `loadDocxFile` sets state immediately.
+  useEffect(() => {
+    if (!initialFile) return;
+    const handle = window.setTimeout(() => void loadDocxFile(initialFile), 0);
+    return () => window.clearTimeout(handle);
+  }, [initialFile, loadDocxFile]);
 
   const handleOpenClick = () => {
     setError('');
     fileInputRef.current?.click();
   };
 
-  const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-
-    setError('');
-    setFileName(file.name);
-    setHasContent(false);
-    setTotalPages(0);
-    setCurrentPage(1);
-    containerRef.current?.replaceChildren();
-
-    try {
-      setIsLoading(true);
-      const bytes = new Uint8Array(await file.arrayBuffer()).slice();
-      await renderDocument(bytes.buffer);
-    } catch (err) {
-      setError(
-        `Could not parse "${file.name}": ${
-          err instanceof Error ? err.message : 'the file is not a valid .docx document'
-        }`
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    if (file) void loadDocxFile(file);
   };
 
   return (

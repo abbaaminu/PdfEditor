@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { join, resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 
 function findProjectRoot(): string | null {
   const candidates = [process.cwd(), resolve(process.cwd(), '..')];
@@ -45,8 +46,57 @@ function syncPdfjsAssets(): void {
 
 syncPdfjsAssets();
 
+/**
+ * Installs the app as a PWA and as the OS handler for PDF/DOCX files.
+ *
+ * `injectRegister: null` keeps the auto-injected registration script out of
+ * `index.html`: the same build is loaded from `file://` inside the Electron
+ * shell, where `serviceWorker.register()` fails. `src/main.tsx` registers the
+ * worker itself, and only over http(s).
+ */
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+const pwa = VitePWA({
+  registerType: 'autoUpdate',
+  injectRegister: null,
+  includeAssets: ['icon.png'],
+  manifest: {
+    name: 'PDF & Doc Suite',
+    short_name: 'PDF Editor',
+    description: 'Edit PDFs, convert Word documents and manage files entirely in your browser.',
+    lang: 'en',
+    theme_color: '#0f172a',
+    background_color: '#0f172a',
+    display: 'standalone',
+    orientation: 'any',
+    // `base` is relative, so the manifest and the file handlers stay inside
+    // whatever folder the build is hosted from.
+    start_url: './',
+    scope: './',
+    icons: [
+      { src: 'icon.png', sizes: '1024x1024', type: 'image/png', purpose: 'any' },
+      { src: 'icon.png', sizes: '1024x1024', type: 'image/png', purpose: 'maskable' },
+    ],
+    file_handlers: [
+      // vite-plugin-pwa's ManifestOptions only types `action` + `accept`;
+      // everything Chromium needs to register the OS association is here.
+      { action: './', accept: { 'application/pdf': ['.pdf'] } },
+      { action: './', accept: { [DOCX_MIME]: ['.docx'] } },
+    ],
+  },
+  workbox: {
+    // The staged pdf.js cmaps/fonts are megabytes of rarely used data; they are
+    // fetched on demand from the network instead of being precached.
+    globPatterns: ['**/*.{js,css,html,png,svg,ico,webmanifest}'],
+    globIgnores: ['pdfjs-assets/**'],
+    maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+    cleanupOutdatedCaches: true,
+  },
+});
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), pwa],
+
   base: './',
   build: {
     emptyOutDir: true,

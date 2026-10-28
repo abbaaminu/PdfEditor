@@ -30,6 +30,12 @@ export function sanitizeWinAnsiText(value: string): string {
       // Soft hyphen, zero-width joiners/spaces and BOM: dropped outright.
       // eslint-disable-next-line no-misleading-character-class -- individual code points, not emoji sequences
       .replace(/[\u00ad\u200b\u200c\u200d\u2060\ufeff]/g, '')
+      // Control characters (tab, CR/LF, ESC) are inside the 0x00–0xFF range but
+      // have no WinAnsi glyph, so pdf-lib throws on them. A newline pasted into
+      // a single-line label used to abort a whole export; flatten it instead.
+      // eslint-disable-next-line no-control-regex -- see comment above
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .replace(/[\t\r\n]/g, ' ')
       // Anything left outside the WinAnsi byte range (emoji, CJK, symbols).
       // eslint-disable-next-line no-control-regex -- WinAnsi is a single-byte range starting at 0x00
       .replace(/[^\x00-\xFF]/g, '')
