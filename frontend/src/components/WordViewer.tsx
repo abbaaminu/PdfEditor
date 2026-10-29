@@ -157,8 +157,8 @@ export const WordViewer: React.FC<WordViewerProps> = ({ initialFile = null }) =>
   };
 
   return (
-    <div className="mx-auto max-w-4xl p-6 text-slate-100">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="mx-auto w-full max-w-4xl p-4 text-slate-100 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <FileText className="h-6 w-6 text-indigo-400" />
           <h2 className="text-xl font-bold">Word Document Viewer</h2>
@@ -196,7 +196,7 @@ export const WordViewer: React.FC<WordViewerProps> = ({ initialFile = null }) =>
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="max-h-[80vh] min-h-[400px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 text-slate-200"
+        className="max-h-[80vh] min-h-[400px] overflow-auto rounded-xl border border-slate-800 bg-slate-900 p-3 text-slate-200 sm:p-6"
       >
         {totalPages > 0 && (
           <div className="sticky top-0 z-10 mb-4 border-b border-slate-700 bg-slate-900/95 px-2 py-2 text-xs font-semibold text-slate-300 backdrop-blur">

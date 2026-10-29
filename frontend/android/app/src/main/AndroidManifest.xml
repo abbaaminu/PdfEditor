@@ -32,4 +32,16 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      @capacitor/filesystem needs these to export files into the public
+      Documents folder. They are only requested on Android 10 and older (the
+      plugin checks them at runtime before the first Documents write); newer
+      versions use scoped storage and ignore them.
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
 </manifest>

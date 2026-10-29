@@ -24,6 +24,7 @@ import { subscribeToLaunchedFiles } from './lib/launchQueue';
 import type { LaunchedFile } from './lib/launchQueue';
 import { compressPdfToPdf } from './lib/pdfRenderer';
 import type { CompressionPresetKey } from './lib/pdfRenderer';
+import { describeSavedFile, savePdf } from './utils/fileExport';
 import logo from '../../assets/icon.png';
 
 type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
@@ -31,19 +32,6 @@ type TabId = 'pdf-tools' | 'pdf-viewer' | 'viewer' | 'creator';
 type ToolId = PdfToolId;
 
 type BusyMap = Partial<Record<ToolId, boolean>>;
-
-function downloadPdf(bytes: Uint8Array, fileName: string): void {
-  const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoking synchronously can abort the download before it starts.
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function parsePageRanges(value: string, total: number): number[] {
   const pages = new Set<number>();
@@ -153,11 +141,14 @@ function Dashboard() {
 
     setBusy((current) => ({ ...current, [opId]: true }));
     toast.processing('Processing in your browser…', `${opId}:processing`);
+    // Collect where each export landed: on native builds the file goes to the
+    // device filesystem, so the toast has to say so instead of "downloaded".
+    const savedMessages: string[] = [];
     try {
       if (opId === 'merge-pdf') {
-        downloadPdf(await mergePdfFiles(sourceFiles), 'merged.pdf');
+        savedMessages.push(describeSavedFile(await savePdf(await mergePdfFiles(sourceFiles), 'merged.pdf')));
       } else if (opId === 'images-to-pdf') {
-        downloadPdf(await imagesToPdf(sourceFiles), 'images.pdf');
+        savedMessages.push(describeSavedFile(await savePdf(await imagesToPdf(sourceFiles), 'images.pdf')));
       } else if (opId === 'compress-pdf') {
         // The panel sends backend-style preset names + a 10–90% JPEG quality.
         const presetInput = typeof options.preset === 'string' ? options.preset : '';
@@ -165,9 +156,13 @@ function Dashboard() {
           presetInput === 'printer' || presetInput === 'screen' ? presetInput : 'ebook';
         const quality =
           typeof options.quality === 'number' ? options.quality / 100 : undefined;
-        downloadPdf(
-          await compressPdfToPdf(sourceFiles[0], { preset, quality }),
-          `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`
+        savedMessages.push(
+          describeSavedFile(
+            await savePdf(
+              await compressPdfToPdf(sourceFiles[0], { preset, quality }),
+              `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-compressed.pdf`
+            )
+          )
         );
       } else if (opId === 'split-pdf') {
         const source = await PDFDocument.load(await sourceFiles[0].arrayBuffer());
@@ -184,12 +179,23 @@ function Dashboard() {
           const output = await PDFDocument.create();
           const pages = await output.copyPages(source, groups[index]);
           pages.forEach((page) => output.addPage(page));
-          downloadPdf(await output.save(), `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-part-${index + 1}.pdf`);
+          savedMessages.push(
+            describeSavedFile(
+              await savePdf(
+                await output.save(),
+                `${sourceFiles[0].name.replace(/\.pdf$/i, '')}-part-${index + 1}.pdf`
+              )
+            )
+          );
         }
       }
       if (!isProUser) incrementUsage();
       toast.dismissKey(`${opId}:processing`);
-      toast.success('Operation completed in your browser.', { key: `${opId}:result` });
+      const successMessage =
+        savedMessages.length > 3
+          ? `${savedMessages.length} files exported. ${savedMessages[0]}`
+          : savedMessages.join(' ') || 'Operation completed in your browser.';
+      toast.success(successMessage, { key: `${opId}:result` });
     } catch (error) {
       toast.dismissKey(`${opId}:processing`);
       toast.error(error instanceof Error ? error.message : 'The browser operation failed.', { key: `${opId}:result` });
@@ -199,22 +205,22 @@ function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-        <div className="flex items-center gap-6">
+    <div className="min-h-screen w-full bg-slate-950 font-sans text-slate-100">
+      <header className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 sm:px-6 sm:py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-3 lg:gap-6">
           {/* Logo + Title Section */}
           <div className="flex items-center gap-3">
             <img
               src={logo}
               alt="PDF & Doc Suite Logo"
-              className="h-9 w-9 object-contain drop-shadow-md"
+              className="h-8 w-8 object-contain drop-shadow-md sm:h-9 sm:w-9"
             />
-            <h1 className="text-xl font-bold tracking-tight text-indigo-400">
+            <h1 className="text-lg font-bold tracking-tight text-indigo-400 sm:text-xl">
               PDF & Doc Suite
             </h1>
           </div>
 
-          <nav className="flex items-center gap-2">
+          <nav className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setActiveTab('pdf-tools')}
@@ -261,7 +267,7 @@ function Dashboard() {
             </button>
 
             {/* Microsoft Store & GitHub Desktop Releases Links */}
-            <div className="ml-2 flex items-center gap-2 border-l border-slate-800 pl-3">
+            <div className="ml-2 hidden items-center gap-2 border-l border-slate-800 pl-3 sm:flex">
               <a
                 href="https://apps.microsoft.com/store/detail/9NFXGFVZG41Z?cid=DevShareMCLPCS"
                 target="_blank"
@@ -287,7 +293,7 @@ function Dashboard() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {!isProUser && (
             <span
               className="flex items-center rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-xs font-semibold text-slate-300"
@@ -332,7 +338,7 @@ function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl p-8">
+      <main className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
         <div className={activeTab === 'pdf-tools' ? '' : 'hidden'}>
           <PdfTools
             // Every OS launch remounts the tools panel so it opens on the

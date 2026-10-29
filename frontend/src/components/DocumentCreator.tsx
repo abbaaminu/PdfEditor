@@ -42,6 +42,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { MAX_FREE_USES, useAuthStore } from '../store/auth-context';
+import { describeSavedFile, saveFile } from '../utils/fileExport';
 
 type HeadingValue = 'p' | 'h1' | 'h2' | 'h3';
 type HeadingKey = (typeof HeadingLevel)[keyof typeof HeadingLevel];
@@ -510,6 +511,7 @@ export const DocumentCreator: React.FC<DocumentCreatorProps> = ({ onFreeTrialExh
   const [hasContent, setHasContent] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [exportNote, setExportNote] = useState('');
   const [fontFamily, setFontFamily] = useState('Arial');
   const [fontSizePt, setFontSizePt] = useState(12);
   const [tableRows, setTableRows] = useState(3);
@@ -715,15 +717,18 @@ export const DocumentCreator: React.FC<DocumentCreatorProps> = ({ onFreeTrialExh
 
     setIsExporting(true);
     setExportError('');
+    setExportNote('');
     try {
       const blob = await Packer.toBlob(doc);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${sanitizeDownloadFileName(titleText)}.docx`;
-      link.click();
+      // Routes through Capacitor Filesystem on Android/iOS and a normal blob
+      // download everywhere else.
+      const saved = await saveFile({
+        data: blob,
+        fileName: `${sanitizeDownloadFileName(titleText)}.docx`,
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
       incrementUsage(); // Successful export consumes one free-trial use.
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportNote(describeSavedFile(saved));
     } catch (err) {
       setExportError(err instanceof Error ? err.message : 'Failed to export the .docx file.');
     } finally {
@@ -737,8 +742,8 @@ export const DocumentCreator: React.FC<DocumentCreatorProps> = ({ onFreeTrialExh
     'rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
   return (
-    <div className="mx-auto max-w-5xl p-6 text-slate-100">
-      <div className="mb-6 flex items-center justify-between gap-4">
+    <div className="mx-auto w-full max-w-5xl p-4 text-slate-100 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex items-center gap-2">
           <FilePlus className="h-6 w-6 text-indigo-400" />
           <div>
@@ -766,6 +771,11 @@ export const DocumentCreator: React.FC<DocumentCreatorProps> = ({ onFreeTrialExh
       {exportError && (
         <div className="mb-4 rounded-lg border border-red-800 bg-red-950/50 p-3 text-sm text-red-300">
           {exportError}
+        </div>
+      )}
+      {exportNote && (
+        <div className="mb-4 rounded-lg border border-emerald-800 bg-emerald-950/50 p-3 text-sm text-emerald-300">
+          {exportNote}
         </div>
       )}
 

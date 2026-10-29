@@ -11,6 +11,8 @@ import { FileText, LoaderCircle, Play, Trash2, Upload } from 'lucide-react';
 import mammoth from 'mammoth';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
+import { describeSavedFile, savePdf } from '../utils/fileExport';
+import type { SaveFileResult } from '../utils/fileExport';
 import { useToast } from './toast-context';
 
 interface WordToPdfPanelProps {
@@ -53,17 +55,7 @@ function wrapLines(
   return lines;
 }
 
-function downloadPdf(bytes: Uint8Array, fileName: string): void {
-  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function convertDocxToPdf(file: File): Promise<void> {
+async function convertDocxToPdf(file: File): Promise<SaveFileResult> {
   const arrayBuffer = new Uint8Array(await file.arrayBuffer()).slice().buffer;
   const result = await mammoth.extractRawText({ arrayBuffer });
   const paragraphs = (result.value ?? '')
@@ -108,7 +100,7 @@ async function convertDocxToPdf(file: File): Promise<void> {
 
   const bytes = await pdfDoc.save();
   const baseName = file.name.replace(/\.docx$/i, '');
-  downloadPdf(bytes, `${baseName}.pdf`);
+  return savePdf(bytes, `${baseName}.pdf`);
 }
 
 export const WordToPdfPanel: React.FC<WordToPdfPanelProps> = ({
@@ -137,9 +129,10 @@ export const WordToPdfPanel: React.FC<WordToPdfPanelProps> = ({
     incrementUsage();
     setProcessing(true);
     let converted = 0;
+    const savedMessages: string[] = [];
     for (const file of files) {
       try {
-        await convertDocxToPdf(file);
+        savedMessages.push(describeSavedFile(await convertDocxToPdf(file)));
         converted += 1;
       } catch (err) {
         toast.error(
@@ -153,8 +146,8 @@ export const WordToPdfPanel: React.FC<WordToPdfPanelProps> = ({
     if (converted > 0) {
       toast.success(
         converted === 1
-          ? 'Word document converted to PDF.'
-          : `${converted} Word documents converted to PDF.`
+          ? `Word document converted to PDF. ${savedMessages[0]}`
+          : `${converted} Word documents converted to PDF. ${savedMessages[0]}`
       );
     }
   };

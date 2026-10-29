@@ -6,7 +6,7 @@
 // pages, an IntersectionObserver keeps the "Page X of Y" indicator in sync,
 // and the page-number input smooth-scrolls to the requested page.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import {
   ChevronLeft,
@@ -50,6 +50,8 @@ export const PdfViewer: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** Keeps the current pdf.js loading task so it can be destroyed on change/unmount. */
   const documentTaskRef = useRef<ReturnType<typeof loadPdfDocument> | null>(null);
+  /** Guards the one-time fit-to-width that runs after a document is rendered. */
+  const autoFitDoneRef = useRef(false);
 
   const [fileName, setFileName] = useState('');
   const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
@@ -105,6 +107,7 @@ export const PdfViewer: React.FC = () => {
     setZoom(1);
     setRotation(0);
     setIsLoading(true);
+    autoFitDoneRef.current = false;
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -137,14 +140,30 @@ export const PdfViewer: React.FC = () => {
     if (Number.isFinite(parsed)) scrollToPage(parsed);
   };
 
-  const handleFitToWidth = () => {
+  const handleFitToWidth = useCallback((): boolean => {
     const container = scrollRef.current;
     const canvas = canvasRef.current;
-    if (!container || !canvas || canvas.width === 0) return;
+    if (!container || !canvas || canvas.width === 0 || container.clientWidth === 0) return false;
     const width = container.clientWidth - PAGE_GAP_CSS * 2;
     const currentScale = canvas.width / zoom;
-    if (currentScale > 0) setZoom(clampZoom(width / currentScale));
-  };
+    if (currentScale <= 0) return false;
+    setZoom(clampZoom(width / currentScale));
+    return true;
+  }, [zoom]);
+
+  // Fit the rendered page to the viewer once per document, so phones do not
+  // open a page that is wider than the screen.
+  useEffect(() => {
+    if (isLoading || pageCount === 0) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (autoFitDoneRef.current) return;
+      if (handleFitToWidth()) autoFitDoneRef.current = true;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [handleFitToWidth, isLoading, pageCount]);
 
   const handleFileInput = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -273,7 +292,7 @@ export const PdfViewer: React.FC = () => {
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        className={`relative flex h-[72vh] flex-col items-center gap-8 overflow-y-auto rounded-xl border bg-slate-900 p-6 transition ${
+        className={`relative flex h-[72vh] w-full flex-col items-center gap-8 overflow-auto rounded-xl border bg-slate-900 p-3 transition sm:p-6 ${
           isDragging ? 'border-indigo-400 bg-indigo-950/30' : 'border-slate-800'
         }`}
       >

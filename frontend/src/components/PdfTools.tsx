@@ -19,6 +19,8 @@ import { FileQueue } from './FileQueue';
 import type { QueuedFile } from './FileQueue';
 import { convertPdfToImages } from '../lib/pdfRenderer';
 import type { LaunchedFile } from '../lib/launchQueue';
+import { describeSavedFile, saveFile } from '../utils/fileExport';
+import { useToast } from './toast-context';
 
 export type PdfToolId =
   | 'split-pdf'
@@ -475,8 +477,10 @@ function PdfToImagePanel({
   const [converting, setConverting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, file: 0, files: 0 });
   const [conversionError, setConversionError] = useState('');
+  const [conversionNote, setConversionNote] = useState('');
+  const toast = useToast();
 
-  const downloadImage = async (dataUrl: string, fileName: string, pageNumber: number) => {
+  const saveImage = async (dataUrl: string, fileName: string, pageNumber: number) => {
     let outputUrl = dataUrl;
     let extension = 'png';
 
@@ -496,10 +500,13 @@ function PdfToImagePanel({
       extension = 'jpg';
     }
 
-    const link = document.createElement('a');
-    link.href = outputUrl;
-    link.download = `${fileName.replace(/\.pdf$/i, '')}-page-${pageNumber}.${extension}`;
-    link.click();
+    // `saveFile` writes into the device documents folder on Android/iOS and
+    // falls back to a normal browser download on the web/Electron builds.
+    return saveFile({
+      data: outputUrl,
+      fileName: `${fileName.replace(/\.pdf$/i, '')}-page-${pageNumber}.${extension}`,
+      mimeType: extension === 'jpg' ? 'image/jpeg' : 'image/png',
+    });
   };
 
   const handleConvert = async () => {
@@ -513,8 +520,11 @@ function PdfToImagePanel({
 
     setConverting(true);
     setConversionError('');
+    setConversionNote('');
     setProgress({ current: 0, total: 0, file: 0, files: sourceFiles.length });
 
+    let savedCount = 0;
+    let lastSaved = '';
     try {
       for (let fileIndex = 0; fileIndex < sourceFiles.length; fileIndex += 1) {
         const sourceFile = sourceFiles[fileIndex];
@@ -522,8 +532,17 @@ function PdfToImagePanel({
           setProgress({ current, total, file: fileIndex + 1, files: sourceFiles.length });
         });
         for (let pageIndex = 0; pageIndex < images.length; pageIndex += 1) {
-          await downloadImage(images[pageIndex], sourceFile.name, pageIndex + 1);
+          lastSaved = describeSavedFile(
+            await saveImage(images[pageIndex], sourceFile.name, pageIndex + 1)
+          );
+          savedCount += 1;
         }
+      }
+      if (savedCount > 0) {
+        const note =
+          savedCount === 1 ? lastSaved : `${savedCount} images exported. ${lastSaved}`;
+        setConversionNote(note);
+        toast.success(note);
       }
     } catch (error) {
       setConversionError(error instanceof Error ? error.message : 'The PDF could not be converted.');
@@ -614,6 +633,7 @@ function PdfToImagePanel({
       )}
 
       {conversionError && <p className="text-sm text-red-300">{conversionError}</p>}
+      {conversionNote && <p className="text-sm text-emerald-300">{conversionNote}</p>}
     </div>
   );
 }
@@ -807,7 +827,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({
   // ---- Active tool configuration panel -------------------------------
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => setActive(null)}

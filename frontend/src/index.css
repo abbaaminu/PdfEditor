@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* The Android WebView fits the whole page to the screen, so a single
+   horizontally overflowing child makes the app look zoomed out / desktop sized.
+   Clip instead of scroll so a stray wide element can never widen the viewport. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 body {
   background-color: #020617;
   color: #f8fafc;
@@ -7,6 +16,8 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 ::selection {

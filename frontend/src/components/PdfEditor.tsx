@@ -24,6 +24,7 @@ import type { PDFImage, PDFPage } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import { loadPdfDocument } from '../lib/pdfjs';
 import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
+import { describeSavedFile, savePdf } from '../utils/fileExport';
 import { useToast } from './toast-context';
 
 interface PdfEditorProps {
@@ -108,22 +109,6 @@ function hexToRgbTuple(hex: string): { r: number; g: number; b: number } {
     g: ((parsed >> 8) & 255) / 255,
     b: (parsed & 255) / 255,
   };
-}
-
-function downloadPdf(bytes: Uint8Array, fileName: string): void {
-  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.rel = 'noopener';
-  // The anchor must be in the document for the click to be treated as a user
-  // download by every browser (and by Electron's file:// renderer).
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoking synchronously can abort the download before it starts.
-  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 const rotateCw = (value: PageModel['rotation']): PageModel['rotation'] =>
@@ -423,6 +408,8 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   const startPagesRef = useRef<PageModel[]>([]);
   const historyPastRef = useRef<PageModel[][]>([]);
   const historyFutureRef = useRef<PageModel[][]>([]);
+  /** Guards the one-time fit-to-width that runs after a document is opened. */
+  const autoFitDoneRef = useRef(false);
 
   const [fileName, setFileName] = useState('');
   const [originalPdfBytes, setOriginalPdfBytes] = useState<Uint8Array | null>(null);
@@ -715,6 +702,9 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
       );
       setActiveIndex(0);
       setIsOpen(true);
+      // A freshly opened document is fitted to the workspace again (see the
+      // auto-fit effect below this callback).
+      autoFitDoneRef.current = false;
       setZoom(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The PDF could not be opened.');
@@ -1072,13 +1062,32 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection]);
 
-  const fitToWidth = () => {
+  const fitToWidth = useCallback((): boolean => {
     const container = scrollRef.current;
     const first = proxiesRef.current[pages[0]?.sourceIndex >= 0 ? pages[0].sourceIndex : 0];
-    if (!container || !first) return;
+    if (!container || !first || container.clientWidth === 0) return false;
     const vp = first.getViewport({ scale: 1, rotation: pages[0]?.rotation ?? 0 });
-    setZoom(clampZoom((container.clientWidth - 96) / vp.width));
-  };
+    // The workspace is padded p-2 on phones and p-8 from `sm` upwards, so a phone
+    // needs a much smaller gutter to fill its screen with the page.
+    const gutter = container.clientWidth < 640 ? 24 : 96;
+    setZoom(clampZoom((container.clientWidth - gutter) / vp.width));
+    return true;
+  }, [pages]);
+
+  // Fit the opened document the first time the workspace has a real width, so a
+  // phone never starts on a page that is wider than its screen. A hidden tab has
+  // `clientWidth === 0`, hence the observer instead of a single measurement.
+  useEffect(() => {
+    if (pages.length === 0) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (autoFitDoneRef.current) return;
+      if (fitToWidth()) autoFitDoneRef.current = true;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [fitToWidth, pages.length]);
 
   const exportEdited = async () => {
     if (!originalPdfBytes || pages.length === 0 || exporting) return;
@@ -1087,8 +1096,11 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     try {
       const bytes = await buildEditedPdf(originalPdfBytes, pages);
       incrementUsage();
-      downloadPdf(bytes, `${fileName.replace(/\.pdf$/i, '') || 'document'}-edited.pdf`);
-      toast.success('Edited PDF exported successfully.');
+      const saved = await savePdf(
+        bytes,
+        `${fileName.replace(/\.pdf$/i, '') || 'document'}-edited.pdf`
+      );
+      toast.success(`Edited PDF exported successfully. ${describeSavedFile(saved)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to export the edited PDF.');
     } finally {
@@ -1159,7 +1171,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   ];
 
   return (
-    <div className="flex h-[78vh] flex-col gap-3">
+    <div className="flex flex-col gap-3 lg:h-[78vh]">
       {/* Top toolbar */}
       <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/60 p-1.5">
         {toolButtons.map((tb) => (
@@ -1208,11 +1220,11 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
 
         {/* Left: page manager / thumbnails */}
         {showThumbs && (
-          <aside className="w-44 shrink-0 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/70 p-2">
+          <aside className="max-h-48 w-full shrink-0 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/70 p-2 lg:max-h-none lg:w-44">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Pages</p>
               <button type="button" onClick={() => setShowThumbs(false)} title="Hide thumbnails" className="rounded p-0.5 text-slate-500 hover:text-white">
@@ -1263,7 +1275,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
         <main className="min-w-0 flex-1">
           <div
             ref={scrollRef}
-            className="flex max-h-full flex-col items-center gap-8 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-8"
+            className="flex max-h-full w-full flex-col items-center gap-6 overflow-auto rounded-xl border border-slate-800 bg-slate-900 p-2 sm:gap-8 sm:p-8"
           >
             {pages.map((page, index) => (
               <div key={`${index}-${page.sourceIndex}`} className="shrink-0">
@@ -1290,7 +1302,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
         </main>
 
         {/* Right: contextual inspector */}
-        <aside className="w-64 shrink-0 space-y-3 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-300">
+        <aside className="w-full shrink-0 space-y-3 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-300 lg:w-64">
           {selection && selectedOverlay ? (
             <div className="rounded-lg border border-slate-800 p-2">
               <div className="mb-2 flex items-center justify-between">
