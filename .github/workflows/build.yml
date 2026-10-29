@@ -80,15 +80,15 @@ jobs:
         run: |
           cd frontend/android
           chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease
+          ./gradlew assembleRelease bundleRelease -Dorg.gradle.java.home="${JAVA_HOME}"
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-builds
           path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
+            frontend/android/app/build/outputs/apk/release/*.apk
+            frontend/android/app/build/outputs/bundle/release/*.aab
 
   publish:
     needs: [build-desktop, build-android]
