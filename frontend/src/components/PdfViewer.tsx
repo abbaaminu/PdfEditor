@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import {
+  Bookmark,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -21,6 +22,9 @@ import {
   RotateCw,
   Upload,
 } from 'lucide-react';
+import { DocumentActionBar } from './DocumentActionBar';
+import type { RecommendedToolId } from './DocumentActionBar';
+import { usePageBookmarks } from '../lib/pageBookmarks';
 import { loadPdfDocument } from '../lib/pdfjs';
 import { renderPdfPageToCanvas } from '../lib/pdfRenderer';
 
@@ -44,7 +48,14 @@ function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
 }
 
-export const PdfViewer: React.FC = () => {
+interface PdfViewerProps {
+  /** Returns to the dashboard / tools view; the back button is hidden without it. */
+  onBack?: () => void;
+  /** Opens one of the dashboard's PDF tools from the recommended strip. */
+  onOpenTool?: (toolId: RecommendedToolId) => void;
+}
+
+export const PdfViewer: React.FC<PdfViewerProps> = ({ onBack, onOpenTool }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,6 +74,9 @@ export const PdfViewer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+
+  // Bookmarks are persisted per file name, so reopening a PDF restores them.
+  const { bookmarks, isBookmarked, toggleBookmark, clearBookmarks } = usePageBookmarks(fileName);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -183,6 +197,19 @@ export const PdfViewer: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <DocumentActionBar
+        fileName={fileName}
+        currentPage={pageNumber}
+        pageCount={pageCount}
+        bookmarks={bookmarks}
+        onToggleBookmark={toggleBookmark}
+        onClearBookmarks={clearBookmarks}
+        onChooseFile={() => fileInputRef.current?.click()}
+        onBack={onBack}
+        onJumpToPage={scrollToPage}
+        onOpenTool={onOpenTool}
+      />
+
       {hasDocument && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200">
           <button
@@ -303,8 +330,13 @@ export const PdfViewer: React.FC = () => {
           </div>
         ) : hasDocument ? (
           <div className="relative shrink-0">
-            <p className="mb-1.5 text-center text-[11px] font-medium text-slate-500">
+            <p className="mb-1.5 flex items-center justify-center gap-1 text-center text-[11px] font-medium text-slate-500">
               Page {pageNumber} of {pageCount}
+              {isBookmarked(pageNumber) && (
+                <span title={`Page ${pageNumber} is bookmarked`} className="inline-flex">
+                  <Bookmark className="h-3 w-3 text-amber-400" />
+                </span>
+              )}
             </p>
             <canvas ref={canvasRef} className="block bg-white shadow-2xl" />
             {/* Overlay (instead of swapping the branch) so the canvas element

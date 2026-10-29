@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Bookmark,
   Download,
   FilePlus,
   Maximize2,
@@ -24,7 +25,10 @@ import type { PDFImage, PDFPage } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import { loadPdfDocument } from '../lib/pdfjs';
 import { sanitizeWinAnsiText } from '../lib/pdfRenderer';
+import { usePageBookmarks } from '../lib/pageBookmarks';
 import { describeSavedFile, savePdf } from '../utils/fileExport';
+import { DocumentActionBar } from './DocumentActionBar';
+import type { RecommendedToolId } from './DocumentActionBar';
 import { useToast } from './toast-context';
 
 interface PdfEditorProps {
@@ -35,6 +39,10 @@ interface PdfEditorProps {
    * `null` keeps the editor on its empty "choose a PDF" state.
    */
   initialFile?: File | null;
+  /** Returns to the tools overview; the back button is hidden without it. */
+  onBack?: () => void;
+  /** Opens another dashboard tool from the recommended strip (Split, Compress…). */
+  onOpenTool?: (toolId: RecommendedToolId) => void;
 }
 
 type ToolMode =
@@ -380,6 +388,8 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   canStartAction,
   incrementUsage,
   initialFile = null,
+  onBack,
+  onOpenTool,
 }) => {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -419,6 +429,9 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   const [error, setError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [showThumbs, setShowThumbs] = useState(true);
+
+  // Bookmarks are persisted per file name, so reopening a PDF restores them.
+  const { bookmarks, isBookmarked, toggleBookmark, clearBookmarks } = usePageBookmarks(fileName);
 
   const [pages, setPages] = useState<PageModel[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -1089,6 +1102,16 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     return () => observer.disconnect();
   }, [fitToWidth, pages.length]);
 
+  /** Scrolls the workspace to a bookmarked page and makes it the active page. */
+  const jumpToPage = useCallback(
+    (page: number) => {
+      const index = Math.min(Math.max(page - 1, 0), Math.max(pages.length - 1, 0));
+      setActiveIndex(index);
+      pageElRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [pages.length]
+  );
+
   const exportEdited = async () => {
     if (!originalPdfBytes || pages.length === 0 || exporting) return;
     if (!canStartAction()) return;
@@ -1116,6 +1139,16 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   if (!isOpen) {
     return (
       <div className="space-y-4">
+        <DocumentActionBar
+          fileName=""
+          currentPage={1}
+          pageCount={0}
+          bookmarks={[]}
+          onToggleBookmark={toggleBookmark}
+          onChooseFile={() => inputRef.current?.click()}
+          onBack={onBack}
+          onOpenTool={onOpenTool}
+        />
         <input
           ref={inputRef}
           type="file"
@@ -1172,6 +1205,33 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
 
   return (
     <div className="flex flex-col gap-3 lg:h-[78vh]">
+      {/* Hidden picker: also mounted here so "Choose another PDF" works while a
+          document is open (the empty state has its own copy). */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) void loadFile(file);
+        }}
+      />
+
+      <DocumentActionBar
+        fileName={fileName}
+        currentPage={activeIndex + 1}
+        pageCount={pages.length}
+        bookmarks={bookmarks}
+        onToggleBookmark={toggleBookmark}
+        onClearBookmarks={clearBookmarks}
+        onChooseFile={() => inputRef.current?.click()}
+        onBack={onBack}
+        onJumpToPage={jumpToPage}
+        onOpenTool={onOpenTool}
+      />
+
       {/* Top toolbar */}
       <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/60 p-1.5">
         {toolButtons.map((tb) => (
@@ -1248,7 +1308,14 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
                   <button type="button" className="block w-full" onClick={() => setActiveIndex(index)}>
                     <canvas ref={(el) => { thumbRefs.current[index] = el; }} className="mx-auto block max-h-28 max-w-full bg-white shadow" />
                   </button>
-                  <p className="mt-1 text-center text-[10px] text-slate-400">Page {index + 1}</p>
+                  <p className="mt-1 flex items-center justify-center gap-1 text-center text-[10px] text-slate-400">
+                    Page {index + 1}
+                    {isBookmarked(index + 1) && (
+                      <span title={`Page ${index + 1} is bookmarked`} className="inline-flex text-amber-400">
+                        <Bookmark className="h-3 w-3" />
+                      </span>
+                    )}
+                  </p>
                   <div className="mt-1 flex justify-center gap-0.5">
                     <button type="button" title="Rotate counter-clockwise" onClick={() => rotatePage(index, false)} className="rounded p-0.5 text-slate-400 hover:text-white"><RotateCw className="h-3 w-3 -scale-x-100" /></button>
                     <button type="button" title="Rotate clockwise" onClick={() => rotatePage(index, true)} className="rounded p-0.5 text-slate-400 hover:text-white"><RotateCw className="h-3 w-3" /></button>
@@ -1279,9 +1346,14 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
           >
             {pages.map((page, index) => (
               <div key={`${index}-${page.sourceIndex}`} className="shrink-0">
-                <div className="mb-1.5 text-center text-[11px] text-slate-500">
+                <div className="mb-1.5 flex flex-wrap items-center justify-center gap-1 text-center text-[11px] text-slate-500">
                   Page {index + 1} · {page.rotation !== 0 ? `${page.rotation}°` : 'portrait'}
                   {page.overlays.length > 0 ? ` · ${page.overlays.length} annotation${page.overlays.length === 1 ? '' : 's'}` : ''}
+                  {isBookmarked(index + 1) && (
+                    <span title={`Page ${index + 1} is bookmarked`} className="inline-flex text-amber-400">
+                      <Bookmark className="h-3 w-3" />
+                    </span>
+                  )}
                 </div>
                 <div
                   ref={(el) => { pageElRefs.current[index] = el; }}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BadgeCheck,
   Download,
@@ -11,7 +11,7 @@ import {
 import { DocumentCreator } from './components/DocumentCreator';
 import type { QueuedFile } from './components/FileQueue';
 import { PdfTools } from './components/PdfTools';
-import type { PdfToolId } from './components/PdfTools';
+import type { PdfToolId, PdfToolRequest } from './components/PdfTools';
 import { PdfViewer } from './components/PdfViewer';
 import { ToastProvider } from './components/Toast';
 import { useToast } from './components/toast-context';
@@ -92,6 +92,12 @@ function Dashboard() {
    * default handler for `.pdf` / `.docx` files (see `public/manifest`).
    */
   const [launchedFile, setLaunchedFile] = useState<LaunchedFile | null>(null);
+  /**
+   * One-shot "open this tool" request raised from the viewer's recommended
+   * strip; `requestId` changes on every request so repeats still navigate.
+   */
+  const [toolRequest, setToolRequest] = useState<PdfToolRequest | null>(null);
+  const toolRequestCounterRef = useRef(0);
 
   useEffect(
     () =>
@@ -111,6 +117,13 @@ function Dashboard() {
   const closeUpgradeModal = () => {
     setUpgradeMessage(undefined);
     setIsUpgradeOpen(false);
+  };
+
+  /** Opens one of the PDF tools from another tab (e.g. the viewer's tool strip). */
+  const openPdfTool = (toolId: PdfToolId) => {
+    toolRequestCounterRef.current += 1;
+    setToolRequest({ id: toolId, requestId: toolRequestCounterRef.current });
+    setActiveTab('pdf-tools');
   };
 
   // Tool invocation
@@ -346,12 +359,15 @@ function Dashboard() {
             key={launchedFile ? launchedFile.id : 'initial'}
             busy={busy}
             initialPdfFile={launchedFile?.kind === 'pdf' ? launchedFile : null}
+            requestedTool={toolRequest}
             onRunTool={(opId, files, options) => executeTool(opId, files, options)}
             onRequireUpgrade={(message) => openUpgradeModal(message)}
           />
         </div>
 
-        {activeTab === 'pdf-viewer' && <PdfViewer />}
+        {activeTab === 'pdf-viewer' && (
+          <PdfViewer onBack={() => setActiveTab('pdf-tools')} onOpenTool={openPdfTool} />
+        )}
         {activeTab === 'viewer' && (
           <WordViewer initialFile={launchedFile?.kind === 'docx' ? launchedFile.file : null} />
         )}

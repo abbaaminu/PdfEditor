@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import {
   Archive,
@@ -129,6 +129,16 @@ function Segmented<T extends string | number>({
   );
 }
 
+/**
+ * A one-shot request to open a tool, raised by the viewer's recommended strip.
+ * `requestId` changes on every request so asking for the same tool twice still
+ * reopens it after the user has navigated back to the tool grid.
+ */
+export interface PdfToolRequest {
+  id: PdfToolId;
+  requestId: number;
+}
+
 interface PdfToolsProps {
   /** Which tools are currently processing (drives run-button spinners). */
   busy: Partial<Record<PdfToolId, boolean>>;
@@ -141,6 +151,8 @@ interface PdfToolsProps {
    * opened automatically and the document is loaded straight into the canvas.
    */
   initialPdfFile?: LaunchedFile | null;
+  /** Deep link from another view (e.g. "Split" in the viewer's recommended bar). */
+  requestedTool?: PdfToolRequest | null;
 }
 
 const COMPRESSION_PRESETS: SegOption<CompressionPreset>[] = [
@@ -720,12 +732,25 @@ export const PdfTools: React.FC<PdfToolsProps> = ({
   onRunTool,
   onRequireUpgrade,
   initialPdfFile = null,
+  requestedTool = null,
 }) => {
   const { isProUser, usageCount, incrementUsage } = useAuthStore();
   // A PDF launched from the OS opens the editor directly; `App` remounts this
   // component (fresh `key`) for every launch, so plain state initialisation is
   // enough and no synchronising effect is needed.
   const [active, setActive] = useState<PdfToolId | null>(initialPdfFile ? 'edit-pdf' : null);
+
+  /**
+   * Requests handled already (or raised before this mount) are ignored so a
+   * remount after an OS file launch cannot reopen a stale recommendation.
+   */
+  const handledRequestRef = useRef<number | null>(requestedTool?.requestId ?? null);
+
+  useEffect(() => {
+    if (!requestedTool || handledRequestRef.current === requestedTool.requestId) return;
+    handledRequestRef.current = requestedTool.requestId;
+    setActive(requestedTool.id);
+  }, [requestedTool]);
 
   const [queues, setQueues] = useState<Record<PdfToolId, QueuedFile[]>>({
     'split-pdf': [],
@@ -865,6 +890,8 @@ export const PdfTools: React.FC<PdfToolsProps> = ({
             canStartAction={canStartAction}
             incrementUsage={incrementUsage}
             initialFile={initialPdfFile?.file ?? null}
+            onBack={() => setActive(null)}
+            onOpenTool={(toolId) => setActive(toolId)}
           />
         )}
       </div>

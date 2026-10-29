@@ -45,7 +45,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-builds-${{ matrix.os }}
-          path: release/
+          # Installer packages only. `release/` also contains `win-unpacked/`,
+          # `mac/`, `linux-unpacked/`, `elevate.exe`, `pdfdetach.exe`, DLLs,
+          # *.blockmap and yml metadata — none of that belongs in a release.
+          path: |
+            release/*Setup*.exe
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+            release/*.zip
+          if-no-files-found: warn
 
   build-android:
     runs-on: ubuntu-latest
@@ -105,7 +114,10 @@ jobs:
       - name: Prepare Artifacts for Release
         run: |
           mkdir -p final-release
-          # Only copy main installer packages and bundles, excluding loose helper executables
+          # Strict allow-list: only true installer packages and bundles are staged.
+          # Everything else electron-builder emits (win-unpacked/**, elevate.exe,
+          # pdfdetach.exe, *.dll, *.pak, *.blockmap, latest*.yml, app-update.yml …)
+          # is a loose helper file and must never be published.
           find all-artifacts -type f \( \
             -name "*Setup*.exe" -o \
             -name "*.dmg" -o \
@@ -114,7 +126,23 @@ jobs:
             -name "*.apk" -o \
             -name "*.aab" -o \
             -name "*.zip" \
-          \) -exec cp {} final-release/ \;
+          \) -print0 | while IFS= read -r -d '' artifact; do
+            name="$(basename "$artifact")"
+            if [ -e "final-release/$name" ]; then
+              echo "Keeping first copy of $name (skipping $artifact)"
+              continue
+            fi
+            cp -v "$artifact" "final-release/$name"
+          done
+
+          echo "::group::Staged release assets"
+          ls -lh final-release
+          echo "::endgroup::"
+
+          if [ -z "$(ls -A final-release)" ]; then
+            echo "::error::No installer package or bundle was found — refusing to publish an empty release."
+            exit 1
+          fi
 
       - name: Publish Binaries to GitHub Release
         uses: softprops/action-gh-release@v2
