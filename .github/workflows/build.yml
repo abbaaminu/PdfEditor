@@ -80,8 +80,7 @@ jobs:
         run: |
           cd frontend/android
           chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease -Dorg.gradle.java.home="${JAVA_HOME}"
-
+          ./gradlew assembleRelease bundleRelease -Dorg.gradle.java.home="${JAVA_HOME}" --no-daemon
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
