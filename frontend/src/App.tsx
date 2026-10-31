@@ -6,7 +6,11 @@ import {
   FileText,
   Monitor,
   Scissors,
+  Smartphone,
   Sparkles,
+  X,
+  Laptop,
+  CheckCircle2,
 } from 'lucide-react';
 import { DocumentCreator } from './components/DocumentCreator';
 import type { QueuedFile } from './components/FileQueue';
@@ -85,23 +89,16 @@ function Dashboard() {
     useAuthStore();
   const [activeTab, setActiveTab] = useState<TabId>('pdf-tools');
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
+  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<BusyMap>({});
-  /**
-   * File handed over by the OS when the installed PWA is launched as the
-   * default handler for `.pdf` / `.docx` files (see `public/manifest`).
-   */
+  
   const [launchedFile, setLaunchedFile] = useState<LaunchedFile | null>(null);
-  /**
-   * One-shot "open this tool" request raised from the viewer's recommended
-   * strip; `requestId` changes on every request so repeats still navigate.
-   */
   const [toolRequest, setToolRequest] = useState<PdfToolRequest | null>(null);
   const toolRequestCounterRef = useRef(0);
 
   useEffect(
     () =>
-      // No Launch Queue support (Safari/Firefox/Electron) → nothing to wire up.
       subscribeToLaunchedFiles((launched) => {
         setLaunchedFile(launched);
         setActiveTab(launched.kind === 'docx' ? 'viewer' : 'pdf-tools');
@@ -119,14 +116,12 @@ function Dashboard() {
     setIsUpgradeOpen(false);
   };
 
-  /** Opens one of the PDF tools from another tab (e.g. the viewer's tool strip). */
   const openPdfTool = (toolId: PdfToolId) => {
     toolRequestCounterRef.current += 1;
     setToolRequest({ id: toolId, requestId: toolRequestCounterRef.current });
     setActiveTab('pdf-tools');
   };
 
-  // Tool invocation
   const executeTool = async (opId: ToolId, files: QueuedFile[], options: Record<string, unknown>) => {
     if (opId === 'word-to-pdf' || opId === 'edit-pdf') {
       toast.error('This tool runs in your browser — open its panel and use its built-in action.');
@@ -154,8 +149,6 @@ function Dashboard() {
 
     setBusy((current) => ({ ...current, [opId]: true }));
     toast.processing('Processing in your browser…', `${opId}:processing`);
-    // Collect where each export landed: on native builds the file goes to the
-    // device filesystem, so the toast has to say so instead of "downloaded".
     const savedMessages: string[] = [];
     try {
       if (opId === 'merge-pdf') {
@@ -163,7 +156,6 @@ function Dashboard() {
       } else if (opId === 'images-to-pdf') {
         savedMessages.push(describeSavedFile(await savePdf(await imagesToPdf(sourceFiles), 'images.pdf')));
       } else if (opId === 'compress-pdf') {
-        // The panel sends backend-style preset names + a 10–90% JPEG quality.
         const presetInput = typeof options.preset === 'string' ? options.preset : '';
         const preset: CompressionPresetKey =
           presetInput === 'printer' || presetInput === 'screen' ? presetInput : 'ebook';
@@ -221,7 +213,6 @@ function Dashboard() {
     <div className="min-h-screen w-full bg-slate-950 font-sans text-slate-100">
       <header className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 sm:px-6 sm:py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-3 lg:gap-6">
-          {/* Logo + Title Section */}
           <div className="flex items-center gap-3">
             <img
               src={logo}
@@ -254,7 +245,7 @@ function Dashboard() {
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <FileText className="h-4 w-4" /> PDF Viewer
+              <FileText className="h-4 w-4" /> PDF Viewer <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[10px] text-emerald-400">Free</span>
             </button>
             <button
               type="button"
@@ -265,7 +256,7 @@ function Dashboard() {
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <FileText className="h-4 w-4" /> Word Viewer
+              <FileText className="h-4 w-4" /> Word Viewer <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[10px] text-emerald-400">Free</span>
             </button>
             <button
               type="button"
@@ -276,10 +267,10 @@ function Dashboard() {
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <FilePlus className="h-4 w-4" /> Doc Creator
+              <FilePlus className="h-4 w-4" /> Doc Creator <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[10px] text-emerald-400">Free</span>
             </button>
 
-            {/* Microsoft Store & GitHub Desktop Releases Links */}
+            {/* Download Modal Trigger & Microsoft Store */}
             <div className="ml-2 hidden items-center gap-2 border-l border-slate-800 pl-3 sm:flex">
               <a
                 href="https://apps.microsoft.com/store/detail/9NFXGFVZG41Z?cid=DevShareMCLPCS"
@@ -289,19 +280,18 @@ function Dashboard() {
                 title="Get PDF & Doc Suite on Microsoft Store"
               >
                 <Monitor className="h-3.5 w-3.5 text-sky-400" />
-                <span>Get Store App</span>
+                <span>Store App</span>
               </a>
 
-              <a
-                href="https://github.com/abbaaminu/PdfEditor/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
-                title="Download Windows, macOS & Linux installers"
+              <button
+                type="button"
+                onClick={() => setIsDownloadOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-300 transition hover:bg-indigo-600 hover:text-white"
+                title="Choose your OS and download directly"
               >
-                <Download className="h-3.5 w-3.5 text-purple-400" />
-                <span>Desktop App</span>
-              </a>
+                <Download className="h-3.5 w-3.5 text-indigo-400" />
+                <span>Download App</span>
+              </button>
             </div>
           </nav>
         </div>
@@ -330,7 +320,7 @@ function Dashboard() {
           <button
             type="button"
             onClick={() => openUpgradeModal()}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium transition hover:bg-emerald-500"
+            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium transition hover:bg-emerald-500 shadow-lg shadow-emerald-900/20"
           >
             {isProUser ? (
               <BadgeCheck className="h-4 w-4" />
@@ -352,10 +342,45 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
-        <div className={activeTab === 'pdf-tools' ? '' : 'hidden'}>
+        <div className={activeTab === 'pdf-tools' ? 'space-y-6' : 'hidden'}>
+          {/* Marketing & Value Proposition Banner */}
+          <div className="relative overflow-hidden rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/90 via-slate-900 to-purple-950/90 p-6 shadow-2xl sm:p-8">
+            <div className="absolute -right-12 -top-12 h-48 w-48 rounded-full bg-indigo-500/15 blur-3xl"></div>
+            <div className="absolute -left-12 -bottom-12 h-48 w-48 rounded-full bg-emerald-500/10 blur-3xl"></div>
+            
+            <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1 text-xs font-semibold text-emerald-400">
+                  <Sparkles className="h-3.5 w-3.5" /> 100% Free Core Features &middot; Cross-Platform
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                  Your Ultimate PDF & Document Workspace
+                </h2>
+                <p className="max-w-2xl text-sm text-slate-300 sm:text-base leading-relaxed">
+                  Enjoy our <span className="font-semibold text-emerald-400">PDF Viewer</span>, <span className="font-semibold text-emerald-400">Word/Doc Viewer</span>, and <span className="font-semibold text-emerald-400">Doc Creator</span> completely free with zero limits. Advanced PDF manipulation tools include <span className="font-semibold text-amber-300">3 free trial uses</span>, after which you can unlock unlimited Pro power for just <span className="font-semibold text-indigo-300">$2/month</span> or <span className="font-semibold text-indigo-300">$20/year</span>.
+                </p>
+              </div>
+
+              <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => openUpgradeModal()}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 transition hover:from-indigo-500 hover:to-purple-500"
+                >
+                  <Sparkles className="h-4 w-4" /> Go Pro — $2/mo or $20/yr
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDownloadOpen(true)}
+                  className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-700 hover:text-white"
+                >
+                  <Download className="h-4 w-4" /> Download App
+                </button>
+              </div>
+            </div>
+          </div>
+
           <PdfTools
-            // Every OS launch remounts the tools panel so it opens on the
-            // editor with the freshly launched document.
             key={launchedFile ? launchedFile.id : 'initial'}
             busy={busy}
             initialPdfFile={launchedFile?.kind === 'pdf' ? launchedFile : null}
@@ -377,6 +402,100 @@ function Dashboard() {
       </main>
 
       <UpgradeModal isOpen={isUpgradeOpen} onClose={closeUpgradeModal} message={upgradeMessage} />
+      <DownloadOSModal isOpen={isDownloadOpen} onClose={() => setIsDownloadOpen(false)} />
+    </div>
+  );
+}
+
+/** Direct OS Download Modal Component */
+function DownloadOSModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  if (!isOpen) return null;
+
+  const repoBase = 'https://github.com/abbaaminu/PdfEditor/releases/latest/download';
+
+  const platforms = [
+    {
+      name: 'Windows',
+      desc: 'Windows 10 / 11 (64-bit)',
+      icon: Monitor,
+      color: 'text-sky-400 border-sky-500/30 bg-sky-500/10',
+      url: `${repoBase}/PDF.and.Doc.Suite.Setup.1.0.0.exe`,
+    },
+    {
+      name: 'Android',
+      desc: 'Android Mobile App (APK)',
+      icon: Smartphone,
+      color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
+      url: `${repoBase}/app-debug.apk`,
+    },
+    {
+      name: 'macOS',
+      desc: 'Apple Silicon & Intel (.dmg)',
+      icon: Laptop,
+      color: 'text-purple-400 border-purple-500/30 bg-purple-500/10',
+      url: `${repoBase}/PDF.and.Doc.Suite-1.0.0-arm64.dmg`,
+    },
+    {
+      name: 'Linux',
+      desc: 'Ubuntu, Fedora, Debian (.deb)',
+      icon: FileText,
+      color: 'text-amber-400 border-amber-500/30 bg-amber-500/10',
+      url: `${repoBase}/pdfeditor_1.0.0_amd64.deb`,
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="relative w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl sm:p-8">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="space-y-2 mb-6">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-400 border border-indigo-500/20">
+            <Download className="h-3.5 w-3.5" /> Direct Downloads
+          </div>
+          <h3 className="text-xl font-bold text-white">Download PDF & Doc Suite</h3>
+          <p className="text-sm text-slate-400">
+            Select your operating system to start downloading the installer instantly.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {platforms.map((p) => {
+            const Icon = p.icon;
+            return (
+              <a
+                key={p.name}
+                href={p.url}
+                onClick={onClose}
+                className="group flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-indigo-500/50 hover:bg-slate-800/80"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className={`rounded-lg border p-2.5 ${p.color}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <Download className="h-4 w-4 text-slate-500 group-hover:text-indigo-400 transition transform group-hover:-translate-y-0.5" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-white group-hover:text-indigo-300 transition">
+                    {p.name}
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">{p.desc}</p>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400 border-t border-slate-800/80 pt-4">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <span>Secure direct downloads from official GitHub Releases</span>
+        </div>
+      </div>
     </div>
   );
 }
